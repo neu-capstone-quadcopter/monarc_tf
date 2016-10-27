@@ -1,8 +1,10 @@
 #include <ros/ros.h>
+#include <ros/console.h>
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2_ros/transform_broadcaster.h>
 #include <geometry_msgs/TransformStamped.h>
 #include <sensor_msgs/PointCloud2.h>
+#include <sensor_msgs/point_cloud2_iterator.h>
 
 // pointCloudCallback processes a single PointCloud2 message. We currently have
 // this directly linked to the creation and broadcast of a transform. As we add
@@ -28,10 +30,10 @@ double getMiddleAverage(const sensor_msgs::PointCloud2& cloud)
     //to right and then from top to bottom, so it will
     //have the entire first row first in order.
 
-	int right = (totalW/2)+(totalW*(percentSize/2));
-	int left = (totalW/2)-(totalW*(percentSize/2));
-	int top = (totalH/2))+(totalH*(percentSize/2);
-    int bottom = (totalH/2)-(totalH*(percentSize/2));
+	// int right = (totalW/2)+(totalW*(percentSize/2));
+	// int left = (totalW/2)-(totalW*(percentSize/2));
+	// int top = (totalH/2))+(totalH*(percentSize/2);
+    // int bottom = (totalH/2)-(totalH*(percentSize/2));
 
 	double count = 0.0;
 	double totalDepth = 0.0;
@@ -42,12 +44,7 @@ double getMiddleAverage(const sensor_msgs::PointCloud2& cloud)
 
     for (; iter_x != iter_x.end(); ++iter_x, ++iter_y, ++iter_z)
     {
-        //cout << "X coord = " << (*iter_x) << "; Y coord = " <<  (*iter_y) << "; Z coord = " << (*iter_z) << ";\n";
-        ROS_INFO("monarc_uart_driver using UART port: %a", (*iter_x);
-        ROS_INFO("monarc_uart_driver using UART port: %s", (*iter_x);
-        ROS_INFO("monarc_uart_driver using UART port: %p", (*iter_x);
-        ROS_INFO("monarc_uart_driver using UART port: %i", (*iter_x);
-        ROS_INFO("monarc_uart_driver using UART port: %d", (*iter_x);
+        cout << "X coord = " << (*iter_x) << "; Y coord = " <<  (*iter_y) << "; Z coord = " << (*iter_z) << ";\n";
         count += 1.0;
         totalDepth += (*iter_x);
         /*
@@ -71,7 +68,7 @@ double getMiddleAverage(const sensor_msgs::PointCloud2& cloud)
 void pointCloudCallback(const sensor_msgs::PointCloud2& msg){
   static tf2_ros::TransformBroadcaster br;
   avgDistance = getMiddleAverage(msg);
-  //cout << "avgDistance = " << avgDistance << "\n";
+  cout << "avgDistance = " << avgDistance << "\n";
 
   geometry_msgs::TransformStamped transformStamped;
   transformStamped.header.stamp = ros::Time::now();
