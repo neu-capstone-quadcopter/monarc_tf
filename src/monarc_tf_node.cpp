@@ -8,6 +8,7 @@
 #include <geometry_msgs/TransformStamped.h>
 #include <sensor_msgs/PointCloud2.h>
 #include <sensor_msgs/point_cloud2_iterator.h>
+#include <iostream>
 
 #include "monarc_tf/FlyAction.h"
 #include "monarc_tf/FlyGoal.h"
@@ -22,6 +23,7 @@
 // - Use a Time Synchronizer (http://wiki.ros.org/message_filters#Time_Synchronizer)
 //
 
+using namespace std;
 double avgDistance;
 
 
@@ -76,7 +78,7 @@ void pointCloudCallback(const sensor_msgs::PointCloud2& msg){
   static tf2_ros::TransformBroadcaster br;
   avgDistance = getMiddleAverage(msg);
   cout << "avgDistance = " << avgDistance << "\n";
-
+  ROS_INFO( "The callback got hit\n" );
   geometry_msgs::TransformStamped transformStamped;
   transformStamped.header.stamp = ros::Time::now();
   transformStamped.header.frame_id = "world";
