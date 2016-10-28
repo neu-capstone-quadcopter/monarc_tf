@@ -18,7 +18,7 @@
 
 using namespace std;
 
-double avgDistance 0.0 ;
+double avgDistance = 0.0;
 double pastDistance = 0.0;
 
 double * getMinMax(const sensor_msgs::PointCloud2& cloud)
@@ -76,7 +76,9 @@ double * getMinMax(const sensor_msgs::PointCloud2& cloud)
             }
         }
     }
-    return {Xmax, Xmin, Ymax, Ymin, Zmax, Zmin};
+    double nums[6];
+    nums = {Xmax, Xmin, Ymax, Ymin, Zmax, Zmin};
+    return nums;
 }
 
 
@@ -94,7 +96,7 @@ double getMiddleAverage(const sensor_msgs::PointCloud2& cloud, double totalW, do
 	int right = centerW+(totalW*percentSize/2);
 	int left = centerW-(totalW*percentSize/2);
 	int top = centerH+(totalH*percentSize/2);
-    int bottom = centerH+(totalH*percentSize/2);
+        int bottom = centerH-(totalH*percentSize/2);
 
 	double count = 0.0;
 	double totalDepth = 0.0;
@@ -121,6 +123,7 @@ double getMiddleAverage(const sensor_msgs::PointCloud2& cloud, double totalW, do
     }
 	return totalDepth/count;
 }
+
 
 void pointCloudCallback(const sensor_msgs::PointCloud2& msg){
   static tf2_ros::TransformBroadcaster br;
