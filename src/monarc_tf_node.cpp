@@ -27,19 +27,20 @@ using namespace std;
 
 double avgDistance = 0.0;
 double pastDistance = 0.0;
+double cloudEdges[6];
 
-double * getMinMax(const sensor_msgs::PointCloud2& cloud)
+void getMinMax(const sensor_msgs::PointCloud2& cloud)
 {
     sensor_msgs::PointCloud2ConstIterator<float> iter_x(cloud, "x");
     sensor_msgs::PointCloud2ConstIterator<float> iter_y(cloud, "y");
     sensor_msgs::PointCloud2ConstIterator<float> iter_z(cloud, "z");
 
-    double Xmax;
-    double Xmin;
-    double Ymax;
-    double Ymin;
-    double Zmax;
-    double Zmin;
+    double Xmax = 0.0;
+    double Xmin = 0.0;
+    double Ymax = 0.0;
+    double Ymin = 0.0;
+    double Zmax = 0.0;
+    double Zmin = 0.0;
 
     int count = 0;
 
@@ -55,7 +56,7 @@ double * getMinMax(const sensor_msgs::PointCloud2& cloud)
         }
         if (!std::isnan (*iter_x) && !std::isnan (*iter_y) && !std::isnan (*iter_z))
         {
-            cout << "X coord = " << (*iter_x) << "; Y coord = " <<  (*iter_y) << "; Z coord = " << (*iter_z) << ";\n";
+           // cout << "X coord = " << (*iter_x) << "; Y coord = " <<  (*iter_y) << "; Z coord = " << (*iter_z) << ";\n";
             count ++;
             if (Xmax < *iter_x)
             {
@@ -83,9 +84,12 @@ double * getMinMax(const sensor_msgs::PointCloud2& cloud)
             }
         }
     }
-    double nums[6];
-    nums = {Xmax, Xmin, Ymax, Ymin, Zmax, Zmin};
-    return nums;
+    cloudEdges[0] = Xmax;
+    cloudEdges[1] = Xmin;
+    cloudEdges[2] = Ymax;
+    cloudEdges[3] = Ymin;
+    cloudEdges[4] = Zmax;
+    cloudEdges[5] = Zmin;
 }
 
 
@@ -121,28 +125,31 @@ double getMiddleAverage(const sensor_msgs::PointCloud2& cloud, double totalW, do
           {
               if (*iter_z <= top && *iter_z >= bottom)
               {
-                  cout << "X coord = " << (*iter_x) << "; Y coord = " <<  (*iter_y) << "; Z coord = " << (*iter_z) << ";\n";
+                 // cout << "X coord = " << (*iter_x) << "; Y coord = " <<  (*iter_y) << "; Z coord = " << (*iter_z) << ";\n";
                   count += 1.0;
                   totalDepth += (*iter_x);
               }
           }
       }
     }
+	if (count < 1.0)
+	{
+		return 0.0;
+	}
 	return totalDepth/count;
 }
 
 
 void pointCloudCallback(const sensor_msgs::PointCloud2& msg){
   static tf2_ros::TransformBroadcaster br;
-  double cloudEdges[6];
-  cloudEdges = getMinMax(const sensor_msgs::PointCloud2& cloud);
+  getMinMax(msg);
   double width = cloudEdges[2] - cloudEdges[3];
   double hieght = cloudEdges[4] - cloudEdges[5];
   double centerWidth = cloudEdges[3] + (width/2.0);
   double centerHieght = cloudEdges[5] + (hieght/2.0);
-  avgDistance = getMiddleAverage(msg, width, hieght, centerWidth, centerHieght, 0.1);
+  avgDistance = getMiddleAverage(msg, width, hieght, centerWidth, centerHieght, 0.8);
   cout << "avgDistance = " << avgDistance << "\n";
-  cout << "x axis change = " << avgDistance - pastDistance;
+  cout << "x axis change = " << avgDistance - pastDistance << "\n";
 
   geometry_msgs::TransformStamped transformStamped;
   transformStamped.header.stamp = ros::Time::now();
