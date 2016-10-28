@@ -17,11 +17,70 @@
 //
 
 using namespace std;
-double avgDistance;
+
+double avgDistance 0.0 ;
+double pastDistance = 0.0;
+
+double * getMinMax(const sensor_msgs::PointCloud2& cloud)
+{
+    sensor_msgs::PointCloud2ConstIterator<float> iter_x(cloud, "x");
+    sensor_msgs::PointCloud2ConstIterator<float> iter_y(cloud, "y");
+    sensor_msgs::PointCloud2ConstIterator<float> iter_z(cloud, "z");
+
+    double Xmax;
+    double Xmin;
+    double Ymax;
+    double Ymin;
+    double Zmax;
+    double Zmin;
+
+    int count = 0;
+
+    for (; iter_x != iter_x.end(); ++iter_x, ++iter_y, ++iter_z)
+    {
+        if (count == 0){
+            Xmax = *iter_x;
+            Xmin = *iter_x;
+            Ymax = *iter_y;
+            Ymin = *iter_y;
+            Zmax = *iter_z;
+            Zmin = *iter_z;
+        }
+        if (!std::isnan (*iter_x) && !std::isnan (*iter_y) && !std::isnan (*iter_z))
+        {
+            cout << "X coord = " << (*iter_x) << "; Y coord = " <<  (*iter_y) << "; Z coord = " << (*iter_z) << ";\n";
+            count ++;
+            if (Xmax < *iter_x)
+            {
+                Xmax = *iter_x;
+            }
+            if (Xmin > *iter_x)
+            {
+                Xmin = *iter_x;
+            }
+            if (Ymax < *iter_y)
+            {
+                Ymax = *iter_y;
+            }
+            if (Ymin > *iter_y)
+            {
+                Ymin = *iter_y;
+            }
+            if (Zmax < *iter_z)
+            {
+                Zmax = *iter_z;
+            }
+            if (Zmin > *iter_z)
+            {
+                Zmin = *iter_z;
+            }
+        }
+    }
+    return {Xmax, Xmin, Ymax, Ymin, Zmax, Zmin};
+}
 
 
-//double getMiddleAverage(const sensor_msgs::PointCloud2& cloud, int totalW, int totalH, double percentSize)
-double getMiddleAverage(const sensor_msgs::PointCloud2& cloud)
+double getMiddleAverage(const sensor_msgs::PointCloud2& cloud, double totalW, double totalH, double centerW, double centerH, double percentSize)
 {
 	//using percentSize of the field of view at the center
 	//in order to calculate the distance change
@@ -32,10 +91,10 @@ double getMiddleAverage(const sensor_msgs::PointCloud2& cloud)
     //to right and then from top to bottom, so it will
     //have the entire first row first in order.
 
-	// int right = (totalW/2)+(totalW*(percentSize/2));
-	// int left = (totalW/2)-(totalW*(percentSize/2));
-	// int top = (totalH/2))+(totalH*(percentSize/2);
-    // int bottom = (totalH/2)-(totalH*(percentSize/2));
+	int right = centerW+(totalW*percentSize/2);
+	int left = centerW-(totalW*percentSize/2);
+	int top = centerH+(totalH*percentSize/2);
+    int bottom = centerH+(totalH*percentSize/2);
 
 	double count = 0.0;
 	double totalDepth = 0.0;
@@ -46,10 +105,6 @@ double getMiddleAverage(const sensor_msgs::PointCloud2& cloud)
 
     for (; iter_x != iter_x.end(); ++iter_x, ++iter_y, ++iter_z)
     {
-        cout << "X coord = " << (*iter_x) << "; Y coord = " <<  (*iter_y) << "; Z coord = " << (*iter_z) << ";\n";
-        count += 1.0;
-        totalDepth += (*iter_x);
-        /*
       // Check if the point is invalid
       if (!std::isnan (*iter_x) && !std::isnan (*iter_y) && !std::isnan (*iter_z))
       {
@@ -62,24 +117,32 @@ double getMiddleAverage(const sensor_msgs::PointCloud2& cloud)
                   totalDepth += (*iter_x);
               }
           }
-      }*/
+      }
     }
 	return totalDepth/count;
 }
 
 void pointCloudCallback(const sensor_msgs::PointCloud2& msg){
   static tf2_ros::TransformBroadcaster br;
-  avgDistance = getMiddleAverage(msg);
+  double cloudEdges[6];
+  cloudEdges = getMinMax(const sensor_msgs::PointCloud2& cloud);
+  double width = cloudEdges[2] - cloudEdges[3];
+  double hieght = cloudEdges[4] - cloudEdges[5];
+  double centerWidth = cloudEdges[3] + (width/2.0);
+  double centerHieght = cloudEdges[5] + (hieght/2.0);
+  avgDistance = getMiddleAverage(msg, width, hieght, centerWidth, centerHieght, 0.1);
   cout << "avgDistance = " << avgDistance << "\n";
-  ROS_INFO( "The callback got hit\n" );
+  cout << "x axis change = " << avgDistance - pastDistance;
+
   geometry_msgs::TransformStamped transformStamped;
   transformStamped.header.stamp = ros::Time::now();
   transformStamped.header.frame_id = "world";
 
   transformStamped.child_frame_id = "monarc";
-  transformStamped.transform.translation.x = 0.0;
+  transformStamped.transform.translation.x = avgDistance - pastDistance;
   transformStamped.transform.translation.y = 0.0;
   transformStamped.transform.translation.z = 0.0;
+  pastDistance = avgDistance;
 
   tf2::Quaternion q;
   q.setRPY(0, 0, 0);
