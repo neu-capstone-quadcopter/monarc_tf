@@ -185,11 +185,6 @@ void pointCloudCallback(const sensor_msgs::PointCloud2& msg){
 void updateIMUCallback(const std_msgs::Int32 IMU)
 {
     cout << "IMU Data Structure:" << IMU.data << "\n";
-}
-
-void updateIMUCallback(const std_msgs::Int32 IMU)
-{
-    cout << "IMU Data Structure:" << IMU.data << "\n";
     readingTimes[accelDataCounter] = clock();
 
     std::cout << float( clock () - begin_time ) /  CLOCKS_PER_SEC;
@@ -206,13 +201,18 @@ double convertAccelToDist()
     deltaDistance /= (2*CLOCKS_PER_SEC*CLOCKS_PER_SEC);
     return deltaDistance;
 }
+void updateGPSCallback(const std_msgs::Int32 GPS)
+{
+    cout << "GPS Data Structure:" << GPS.data << "\n";
+}
 
 int main(int argc, char** argv){
   ros::init(argc, argv, "monarc_tf_node");
   ros::NodeHandle node;
   simpleDist = node.advertise<std_msgs::Float32>("simpleDist", 0.0);
   callBackCounter = node.advertise<std_msgs::Int32>("callbackCount", 0);
-  //ros::Subscriber sub2 = node.subscribe("/IMU", 10, updateIMUCallback);
+  //ros::Subscriber IMUsub = node.subscribe("/IMU", 10, updateIMUCallback);
+  ros::Subscriber GPSsub = node.subscribe("/GPS", 10, updateGPSCallback);
   ros::Subscriber sub = node.subscribe("/points2", 10, pointCloudCallback);
 
   ros::spin();
