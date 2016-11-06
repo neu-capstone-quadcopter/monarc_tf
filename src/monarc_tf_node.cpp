@@ -163,10 +163,12 @@ void pointCloudCallback(const sensor_msgs::PointCloud2& msg){
   transformStamped.transform.rotation.y = q.y();
   transformStamped.transform.rotation.z = q.z();
   transformStamped.transform.rotation.w = q.w();
+
+
   std_msgs::Float32 nDist;
   nDist.data = avgDistance;
-  simpleDist.publish(nDist);
-  
+  simpleDist.publish(nDist); // only used for plotting
+
   std_msgs::Int32 callCount;
   callCount.data = counter;
   callBackCounter.publish(callCount);
