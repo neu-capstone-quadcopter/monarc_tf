@@ -31,6 +31,12 @@ double avgDistance = 0.0;
 double pastDistance = 0.0;
 double cloudEdges[6];
 
+double accelXData[1000];
+double accelYData[1000];
+double accelZData[1000];
+int readingTimes[1000];
+int accelDataCounter = 0;
+
 ros::Publisher simpleDist;
 ros::Publisher callBackCounter;
 int counter = 1;
@@ -104,16 +110,16 @@ double getMiddleAverage(const sensor_msgs::PointCloud2& cloud, double totalW, do
 	//using percentSize of the field of view at the center
 	//in order to calculate the distance change
 	//from last scan to now. This can be more efficient
-  //computationally once we figure out the best number of
-  //points/size of frame to run this function over.
-  //Assumes the vector of points is streaming in from left
-  //to right and then from top to bottom, so it will
-  //have the entire first row first in order.
+    //computationally once we figure out the best number of
+    //points/size of frame to run this function over.
+    //Assumes the vector of points is streaming in from left
+    //to right and then from top to bottom, so it will
+    //have the entire first row first in order.
 
 	int right = centerW+(totalW*percentSize/2);
 	int left = centerW-(totalW*percentSize/2);
 	int top = centerH+(totalH*percentSize/2);
-  int bottom = centerH-(totalH*percentSize/2);
+    int bottom = centerH-(totalH*percentSize/2);
 
 	double count = 0.0;
 	double totalDepth = 0.0;
@@ -192,6 +198,31 @@ void pointCloudCallback(const sensor_msgs::PointCloud2& msg){
   counter++;
 }
 
+void updateIMUCallback(const std_msgs::Int32 IMU)
+{
+    cout << "IMU Data Structure:" << IMU.data << "\n";
+}
+
+void updateIMUCallback(const std_msgs::Int32 IMU)
+{
+    cout << "IMU Data Structure:" << IMU.data << "\n";
+    readingTimes[accelDataCounter] = clock();
+
+    std::cout << float( clock () - begin_time ) /  CLOCKS_PER_SEC;
+}
+
+double convertAccelToDist()
+{
+    double deltaDistance = 0.0;
+    //function uses trapezoidal rule
+    for ( int i = 0; i < (accelDataCounter-1); i++ )
+    {
+        deltaDistance = accelXData[i]+accelXData[i+1]*(readingTimes[i+1]-readingTimes[i])*(readingTimes[i+1]-readingTimes[i]);
+    }
+    deltaDistance /= (2*CLOCKS_PER_SEC*CLOCKS_PER_SEC);
+    return deltaDistance;
+}
+
 typedef actionlib::SimpleActionServer<monarc_tf::FlyAction> Server;
 
 void executeAction(const monarc_tf::FlyGoalConstPtr& goal, Server* as, ros::Publisher* flight_command_pub) {
@@ -235,6 +266,7 @@ int main(int argc, char** argv){
   ros::NodeHandle node;
   simpleDist = node.advertise<std_msgs::Float32>("simpleDist", 0.0);
   callBackCounter = node.advertise<std_msgs::Int32>("callbackCount", 0);
+  //ros::Subscriber sub2 = node.subscribe("/IMU", 10, updateIMUCallback);
   ros::Subscriber sub = node.subscribe("/points2", 10, pointCloudCallback);
 
   ros::Publisher flight_command_pub = node.advertise<monarc_uart_driver::FlightControl>("flight_control", 10);
