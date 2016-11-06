@@ -129,6 +129,8 @@ double getMiddleAverage(const sensor_msgs::PointCloud2& cloud, double totalW, do
 	return totalDepth/count;
 }
 
+int yaw = 0;
+
 // pointCloudCallback processes a single PointCloud2 message. We currently have
 // this directly linked to the creation and broadcast of a transform. As we add
 // more data sources through other subscriptions, this will get more complicated.
@@ -158,7 +160,8 @@ void pointCloudCallback(const sensor_msgs::PointCloud2& msg){
   pastDistance = avgDistance;
 
   tf2::Quaternion q;
-  q.setRPY(0, 0, 0);
+  yaw += 10;
+  q.setRPY(0, 0, yaw);
   transformStamped.transform.rotation.x = q.x();
   transformStamped.transform.rotation.y = q.y();
   transformStamped.transform.rotation.z = q.z();
