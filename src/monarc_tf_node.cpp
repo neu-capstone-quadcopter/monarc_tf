@@ -208,8 +208,6 @@ void updateIMUCallback(const std_msgs::Int32 IMU)
 {
     cout << "IMU Data Structure:" << IMU.data << "\n";
     readingTimes[accelDataCounter] = clock();
-
-    std::cout << float( clock () - begin_time ) /  CLOCKS_PER_SEC;
 }
 
 void convertAccelToDist()
