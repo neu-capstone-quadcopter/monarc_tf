@@ -11,21 +11,40 @@
 
 using namespace std;
 
+//--------------------------- ROS Published Topics ---------------------------//
+ros::Publisher simpleDist;
+ros::Publisher callBackCounter;
+//--------------------------- ROS Published Topics ---------------------------//
+
+
+//-------------------- Point Cloud Localization Variables --------------------//
 double avgDistance = 0.0;
 double pastDistance = 0.0;
 double cloudEdges[6];
+//-------------------- Point Cloud Localization Variables --------------------//
 
+
+//----------------- IMU Deadreckoning Calculation Variables ------------------//
 double accelXData[1000];
 double accelYData[1000];
 double accelZData[1000];
+
+double latestXDist;
+double latestYDist;
+double latestZDist;
+
 int readingTimes[1000];
 int accelDataCounter = 0;
+//----------------- IMU Deadreckoning Calculation Variables ------------------//
 
-ros::Publisher simpleDist;
-ros::Publisher callBackCounter;
+
 int counter = 1;
 
+
+//-------------------- Point Cloud Localization Functions --------------------//
 void getMinMax(const sensor_msgs::PointCloud2& cloud)
+//This function updates the global variable cloudEdges[], which is then used to
+//to calculate the
 {
     sensor_msgs::PointCloud2ConstIterator<float> iter_x(cloud, "x");
     sensor_msgs::PointCloud2ConstIterator<float> iter_y(cloud, "y");
@@ -88,18 +107,16 @@ void getMinMax(const sensor_msgs::PointCloud2& cloud)
     cloudEdges[5] = Zmin;
 }
 
-
 double getMiddleAverage(const sensor_msgs::PointCloud2& cloud, double totalW, double totalH, double centerW, double centerH, double percentSize)
+//using percentSize of the field of view at the center
+//in order to calculate the distance change
+//from last scan to now. This can be more efficient
+//computationally once we figure out the best number of
+//points/size of frame to run this function over.
+//Assumes the vector of points is streaming in from left
+//to right and then from top to bottom, so it will
+//have the entire first row first in order.
 {
-	//using percentSize of the field of view at the center
-	//in order to calculate the distance change
-	//from last scan to now. This can be more efficient
-    //computationally once we figure out the best number of
-    //points/size of frame to run this function over.
-    //Assumes the vector of points is streaming in from left
-    //to right and then from top to bottom, so it will
-    //have the entire first row first in order.
-
 	int right = centerW+(totalW*percentSize/2);
 	int left = centerW-(totalW*percentSize/2);
 	int top = centerH+(totalH*percentSize/2);
@@ -135,6 +152,8 @@ double getMiddleAverage(const sensor_msgs::PointCloud2& cloud, double totalW, do
 	return totalDepth/count;
 }
 
+
+void pointCloudCallback(const sensor_msgs::PointCloud2& msg)
 // pointCloudCallback processes a single PointCloud2 message. We currently have
 // this directly linked to the creation and broadcast of a transform. As we add
 // more data sources through other subscriptions, this will get more complicated.
@@ -142,7 +161,7 @@ double getMiddleAverage(const sensor_msgs::PointCloud2& cloud, double totalW, do
 // - Buffer the latest value for each subscription and process at a fixed rate
 // - Buffer all but one subscription, and "drive" the broadcast from one (Chris Likes this option)
 // - Use a Time Synchronizer (http://wiki.ros.org/message_filters#Time_Synchronizer)
-void pointCloudCallback(const sensor_msgs::PointCloud2& msg){
+{
   static tf2_ros::TransformBroadcaster br;
   getMinMax(msg);
   double width = cloudEdges[2] - cloudEdges[3];
@@ -181,7 +200,10 @@ void pointCloudCallback(const sensor_msgs::PointCloud2& msg){
   br.sendTransform(transformStamped);
   counter++;
 }
+//-------------------- Point Cloud Localization Functions --------------------//
 
+
+//----------------------- IMU Deadreckoning Functions ------------------------//
 void updateIMUCallback(const std_msgs::Int32 IMU)
 {
     cout << "IMU Data Structure:" << IMU.data << "\n";
@@ -190,28 +212,40 @@ void updateIMUCallback(const std_msgs::Int32 IMU)
     std::cout << float( clock () - begin_time ) /  CLOCKS_PER_SEC;
 }
 
-double convertAccelToDist()
+void convertAccelToDist()
 {
-    double deltaDistance = 0.0;
+    latestXDist = 0.0;
+    latestYDist = 0.0;
+    latestZDist = 0.0;
     //function uses trapezoidal rule
     for ( int i = 0; i < (accelDataCounter-1); i++ )
     {
-        deltaDistance = accelXData[i]+accelXData[i+1]*(readingTimes[i+1]-readingTimes[i])*(readingTimes[i+1]-readingTimes[i]);
+        latestXDist = accelXData[i]+accelXData[i+1]*(readingTimes[i+1]-readingTimes[i])*(readingTimes[i+1]-readingTimes[i]);
+        latestYDist = accelYData[i]+accelXData[i+1]*(readingTimes[i+1]-readingTimes[i])*(readingTimes[i+1]-readingTimes[i]);
+        latestZDist = accelZData[i]+accelXData[i+1]*(readingTimes[i+1]-readingTimes[i])*(readingTimes[i+1]-readingTimes[i]);
     }
-    deltaDistance /= (2*CLOCKS_PER_SEC*CLOCKS_PER_SEC);
-    return deltaDistance;
+    latestXDist /= (2*CLOCKS_PER_SEC*CLOCKS_PER_SEC);
+    latestYDist /= (2*CLOCKS_PER_SEC*CLOCKS_PER_SEC);
+    latestZDist /= (2*CLOCKS_PER_SEC*CLOCKS_PER_SEC);
 }
+//----------------------- IMU Deadreckoning Functions ------------------------//
+
+
+//------------------------ GPS Localization Functions ------------------------//
 void updateGPSCallback(const std_msgs::Int32 GPS)
 {
-    cout << "GPS Data Structure:" << GPS.data << "\n";
+    cout << "IMU Data Structure:" << GPS.data << "\n";
 }
+//------------------------ GPS Localization Functions ------------------------//
+
+
 
 int main(int argc, char** argv){
   ros::init(argc, argv, "monarc_tf_node");
   ros::NodeHandle node;
   simpleDist = node.advertise<std_msgs::Float32>("simpleDist", 0.0);
   callBackCounter = node.advertise<std_msgs::Int32>("callbackCount", 0);
-  //ros::Subscriber IMUsub = node.subscribe("/IMU", 10, updateIMUCallback);
+  ros::Subscriber IMUsub = node.subscribe("/IMU", 10, updateIMUCallback);
   ros::Subscriber GPSsub = node.subscribe("/GPS", 10, updateGPSCallback);
   ros::Subscriber sub = node.subscribe("/points2", 10, pointCloudCallback);
 
