@@ -54,6 +54,13 @@ int accelDataCounter = 0;
 //----------------- IMU Deadreckoning Calculation Variables ------------------//
 
 
+//------------------------ GPS Localization Variables ------------------------//
+double GPSLong = -71.08841; //GPS coordinates of wireless club
+double GPSLat = 42.33924;   //GPS coordinates of wireless club
+double GPSAlt = 27.0;       //GPS Altitude of wireless club
+//------------------------ GPS Localization Variables ------------------------//
+
+
 int counter = 1;
 
 
@@ -178,43 +185,43 @@ void pointCloudCallback(const sensor_msgs::PointCloud2& msg)
 // - Buffer all but one subscription, and "drive" the broadcast from one (Chris Likes this option)
 // - Use a Time Synchronizer (http://wiki.ros.org/message_filters#Time_Synchronizer)
 {
-  static tf2_ros::TransformBroadcaster br;
-  getMinMax(msg);
-  double width = cloudEdges[2] - cloudEdges[3];
-  double hieght = cloudEdges[4] - cloudEdges[5];
-  double centerWidth = cloudEdges[3] + (width/2.0);
-  double centerHieght = cloudEdges[5] + (hieght/2.0);
-  avgDistance = getMiddleAverage(msg, width, hieght, centerWidth, centerHieght, 0.8);
-  cout << "avgDistance = " << avgDistance << "\n";
-  cout << "x axis change = " << avgDistance - pastDistance << "\n";
+    static tf2_ros::TransformBroadcaster br;
+    getMinMax(msg);
+    double width = cloudEdges[2] - cloudEdges[3];
+    double hieght = cloudEdges[4] - cloudEdges[5];
+    double centerWidth = cloudEdges[3] + (width/2.0);
+    double centerHieght = cloudEdges[5] + (hieght/2.0);
+    avgDistance = getMiddleAverage(msg, width, hieght, centerWidth, centerHieght, 0.8);
+    cout << "avgDistance = " << avgDistance << "\n";
+    cout << "x axis change = " << avgDistance - pastDistance << "\n";
 
-  geometry_msgs::TransformStamped transformStamped;
-  transformStamped.header.stamp = msg.header.stamp;
-  transformStamped.header.frame_id = "map";
+    geometry_msgs::TransformStamped transformStamped;
+    transformStamped.header.stamp = msg.header.stamp;
+    transformStamped.header.frame_id = "map";
 
-  transformStamped.child_frame_id = msg.header.frame_id;
-  transformStamped.transform.translation.x = avgDistance + pastDistance;
-  transformStamped.transform.translation.y = 0.0;
-  transformStamped.transform.translation.z = 0.0;
-  pastDistance = avgDistance;
+    transformStamped.child_frame_id = msg.header.frame_id;
+    transformStamped.transform.translation.x = avgDistance + pastDistance;
+    transformStamped.transform.translation.y = 0.0;
+    transformStamped.transform.translation.z = 0.0;
+    pastDistance = avgDistance;
 
-  tf2::Quaternion q;
-  q.setRPY(0, 0, 0);
-  transformStamped.transform.rotation.x = q.x();
-  transformStamped.transform.rotation.y = q.y();
-  transformStamped.transform.rotation.z = q.z();
-  transformStamped.transform.rotation.w = q.w();
+    tf2::Quaternion q;
+    q.setRPY(0, 0, 0);
+    transformStamped.transform.rotation.x = q.x();
+    transformStamped.transform.rotation.y = q.y();
+    transformStamped.transform.rotation.z = q.z();
+    transformStamped.transform.rotation.w = q.w();
 
 
-  std_msgs::Float32 nDist;
-  nDist.data = avgDistance;
-  simpleDist.publish(nDist); // only used for plotting
+    std_msgs::Float32 nDist;
+    nDist.data = avgDistance;
+    simpleDist.publish(nDist); // only used for plotting
 
-  std_msgs::Int32 callCount;
-  callCount.data = counter;
-  callBackCounter.publish(callCount);
-  br.sendTransform(transformStamped);
-  counter++;
+    std_msgs::Int32 callCount;
+    callCount.data = counter;
+    callBackCounter.publish(callCount);
+    br.sendTransform(transformStamped);
+    counter++;
 }
 //-------------------- Point Cloud Localization Functions --------------------//
 
@@ -248,7 +255,21 @@ void convertAccelToDist()
 //------------------------ GPS Localization Functions ------------------------//
 void updateGPSCallback(const std_msgs::Int32 GPS)
 {
-    cout << "IMU Data Structure:" << GPS.data << "\n";
+    GPSLat = GPS.latitude;
+    GPSLong = GPS.longitude;
+    GPSAlt = GPS.altitude;
+}
+
+void setFirstGPS(const std_msgs::Int32 GPS)
+{
+    //write something that test for gps lock
+    //Returns NANs until GPS lock
+    //Wait till diaganol of covariance
+    //matrix is below 2 in order to be sure of
+    //position
+    GPSLat = GPS.latitude;
+    GPSLong = GPS.longitude;
+    GPSAlt = GPS.altitude;
 }
 //------------------------ GPS Localization Functions ------------------------//
 
