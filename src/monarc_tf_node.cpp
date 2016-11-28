@@ -1,4 +1,5 @@
 #include <iostream>
+#include <math.h>
 #include <stdexcept>
 
 #include <ros/ros.h>
@@ -26,10 +27,12 @@
 //
 
 using namespace std;
+#define PI 3.1415926535897932
 
 //--------------------------- ROS Published Topics ---------------------------//
 ros::Publisher simpleDist;
 ros::Publisher callBackCounter;
+ros::Publisher flightCommands;
 //--------------------------- ROS Published Topics ---------------------------//
 
 
@@ -55,9 +58,38 @@ int accelDataCounter = 0;
 
 
 //------------------------ GPS Localization Variables ------------------------//
-double GPSLong = -71.08841; //GPS coordinates of wireless club
-double GPSLat = 42.33924;   //GPS coordinates of wireless club
-double GPSAlt = 27.0;       //GPS Altitude of wireless club
+double initialGPScovarianceLatLongReadings = 10.0;
+double initialGPScovarianceAltReadings = 10.0;
+bool GPSinitialized = false;
+int GPScallbackCount = 0;
+int GPSintializationCount = 60; // this is the number of GPS readings we must
+                                // recieve before taking off.
+
+double currentGPSLong = -71.08841; //Initialized to GPS coordinates of wireless club
+double currentGPSLat = 42.33924;   //Initialized to GPS coordinates of wireless club
+double currentGPSAlt = 27.0;       //Initialized to GPS Altitude of wireless club
+double currentCovarianceLatLong = 5.0;
+double currentCovarianceAlt = 9.0;
+
+double lastGPSLong = -71.08841; //These variables log the last GPS coordinates
+double lastGPSLat = 42.33924;
+double lastGPSAlt = 27.0;
+double lastCovarianceLatLong = 5.0;
+double lastCovarianceAlt = 9.0;
+
+double currentGPSmetersLong = 0.0;  //these variables keep track of the exact distance
+double currentGPSmetersLat = 0.0;   //from the very first GPS coordinates that were
+double currentGPSmetersAlt = 0.0;   //logged.
+
+double originGPSlong = 0.0;  //these variables keep track of the exact distance
+double originGPSlat = 0.0;   //from the very first GPS coordinates that were
+double originGPSalt = 0.0;   //logged.
+
+double destinationGPSmetersLong = 0.0;  //these variables keep track of the exact distance
+double destinationGPSmetersLat = 0.0;   //from the very first GPS coordinates that were
+double destinationGPSmetersAlt = 0.0;   //logged.
+
+double radiusOfEarth = (6378137.0 + 6356752.0)/2.0; // Average radius of earth in Meters
 //------------------------ GPS Localization Variables ------------------------//
 
 
@@ -255,9 +287,56 @@ void convertAccelToDist()
 //------------------------ GPS Localization Functions ------------------------//
 void updateGPSCallback(const std_msgs::Int32 GPS)
 {
-    GPSLat = GPS.latitude;
-    GPSLong = GPS.longitude;
-    GPSAlt = GPS.altitude;
+    if (GPSinitialized)
+    {
+        lastGPSLong = currentGPSLong; //These variables log the last GPS coordinates
+        lastGPSLat = currentGPSLat;
+        lastGPSAlt = currentGPSAlt;
+        lastCovarianceLatLong = currentCovarianceLatLong;
+        lastCovarianceAlt = currentCovarianceAlt;
+
+        currentGPSLat = GPS.latitude;
+        currentGPSLong = GPS.longitude;
+        currentGPSAlt = GPS.altitude;
+        currentCovarianceLatLong = GPS.position_covariance[0];
+        currentCovarianceAlt = GPS.position_covariance[8];
+
+    } else {
+        // Everything in this else is to initialize the GPS values
+        if (GPS.position_covariance[0] < initialGPScovarianceLatLongReading)
+        {
+            initialGPScovarianceLatLongReading = GPS.position_covariance[0];
+            originGPSlat = GPS.latitude;
+            originGPSlong = GPS.longitude;
+        }
+        if ( GPS.position_covariance[8] < initialGPScovarianceAltReading)
+        {
+            initialGPScovarianceAltReading = GPS.position_covariance[8];
+            originGPSalt = GPS.altitude;
+        }
+        GPScallbackCount += 1;
+        if (GPScallbackCount == GPSintializationCount)
+        {
+            GPSinitialized = true;
+            currentGPSLat = originGPSlat;
+            currentGPSLong = originGPSlong;
+            currentGPSAlt = originGPSalt;
+        }
+    }
+}
+
+double convertCoordinatesToMeters(double & coordLatest, double & coordOlder)
+{
+    //I based these calculations on the earth being
+    //a perfect sphere. Since we are traveling small
+    //distances relative to the ellipsoidal nature
+    //of the earth, doing the extra calculation for
+    //an ellipsoid is a waste. Also, in this orientation
+    //North, East and Up are the positive directions on
+    //the grid. This convetnion is transformed when
+    //converting to ROS coordinate system, because
+    //West or left is positive in that grid.
+    return radiusOfEarth * (coordLatest-coordOlder) * PI / 180.0;
 }
 
 void setFirstGPS(const std_msgs::Int32 GPS)
@@ -267,9 +346,9 @@ void setFirstGPS(const std_msgs::Int32 GPS)
     //Wait till diaganol of covariance
     //matrix is below 2 in order to be sure of
     //position
-    GPSLat = GPS.latitude;
-    GPSLong = GPS.longitude;
-    GPSAlt = GPS.altitude;
+    currentGPSLat = GPS.latitude;
+    currentGPSLong = GPS.longitude;
+    currentGPSAlt = GPS.altitude;
 }
 //------------------------ GPS Localization Functions ------------------------//
 
