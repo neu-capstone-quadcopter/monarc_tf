@@ -576,6 +576,7 @@ void executeAction(const monarc_tf::FlyGoalConstPtr& goal, Server* as, ros::Publ
         hover_loop.sleep();
       }
       ROS_INFO("HOVER CANCELLED");
+      as->setPreempted();
       return;
     default:
       throw std::invalid_argument("unhandled command type");
