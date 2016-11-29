@@ -38,6 +38,9 @@ double IMUAltFactor = 0.1;
 double ultrasonicFactor = 0.8;
 double GPSfactor = 0.05;
 double barometerFactor = 0.05;
+double takeOffHeight = 3.0;
+
+int approxHover = 900; //throttle at which hovering occurs approximatly
 //--------------------------- TF Tuning Parameters ---------------------------//
 
 //--------------------------- ROS Published Topics ---------------------------//
@@ -336,14 +339,19 @@ void updateIMUCallback(const sensor_msgs::Imu Imu)
 
 void ultraSoundCallback(std_msgs::Int32 ultraAlt)
 {
-    //ground is 190, units are millimeters
-    currentAtm = (ultraAlt.data*(ultraSmoothingFactor))+(currentUltra*(1.0-ultraSmoothingFactor));
+    //ground is approx 190, units are millimeters
+    currentUltra = ((ultraAlt.data*(ultraSmoothingFactor))+(currentUltra*(1.0-ultraSmoothingFactor))-190.0)/1000.0;
 }
 
 void atomspherCallback(std_msgs::Int32 atm)
 {
     //units are in meters
-    currentAtm = (atm.data*(atmSmoothingFactor))+(currentAtm*(1.0-atmSmoothingFactor));
+    if (GPSinitialized)
+    {
+        currentAtm = (atm.data*(atmSmoothingFactor))+(currentAtm*(1.0-atmSmoothingFactor));
+    } else {
+        currentAtm = (atm.data*(0.1))+(currentAtm*(0.9));
+    }
 }
 
 //------------------------ GPS Localization Functions ------------------------//
@@ -386,6 +394,11 @@ void updateGPSCallback(const sensor_msgs::NavSatFix & GPS)
                 currentGPSAlt = originGPSalt;
             }
         }
+        //TODO update these variables so that they involve a weighted average based
+        //on the covariance matrix
+        currentGPSmetersLat = convertCoordinatesToMeters(currentGPSLat, originGPSlat);
+        currentGPSmetersLong = convertCoordinatesToMeters(currentGPSLong, originGPSlong);
+        currentGPSmetersAlt = currentGPSAlt - originGPSalt; //This makes the take off altitude zero which matches it to the barometer
     }
 }
 
@@ -403,17 +416,6 @@ double convertCoordinatesToMeters(double & coordLatest, double & coordOlder)
     return radiusOfEarth * (coordLatest-coordOlder) * PI / 180.0;
 }
 
-void setFirstGPS(const sensor_msgs::NavSatFix & GPS)
-{
-    //write something that test for gps lock
-    //Returns NANs until GPS lock
-    //Wait till diaganol of covariance
-    //matrix is below 2 in order to be sure of
-    //position
-    currentGPSLat = GPS.latitude;
-    currentGPSLong = GPS.longitude;
-    currentGPSAlt = GPS.altitude;
-}
 //------------------------ GPS Localization Functions ------------------------//
 
 void normalizeAltSensorFactors()
@@ -441,9 +443,115 @@ void updateTF()
         normalizeAltSensorFactors();
     }
 
-    transformStamped.transform.translation.x = 0.0;
-    transformStamped.transform.translation.y = 0.0;
+    transformStamped.transform.translation.x = currentGPSmetersLat;
+    transformStamped.transform.translation.y = currentGPSmetersLong;
     transformStamped.transform.translation.z = (IMUAltFactor*latestZDistIMU)+(ultrasonicFactor*currentUltra)+(GPSfactor*currentGPSmetersAlt)+(barometerFactor*currentAtm);
+
+    //TODO set these to the value coming orientation
+    transformStamped.transform.rotation.x = 0;
+    transformStamped.transform.rotation.y = 0;
+    transformStamped.transform.rotation.z = 0;
+    transformStamped.transform.rotation.w = 0;
+}
+
+void enterDangerZone(ros::Publisher* flight_command_pub)
+{
+    //controller mid values are 1000 and they range
+    //from about 200 to 1800
+    int throttle = 200;
+    double upwardVelocity = 0.0;
+    int pastD = 0;
+    int currentD = 0;
+
+    //slowly bring up throttle to 600, about 4 seconds
+    while (throttle < 600)
+    {
+        monarc_uart_driver::FlightControl fCommands;
+        fCommands.pitch = 1000;
+        fCommands.roll = 1000;
+        fCommands.yaw = 1000;
+
+        throttle = throttle + 1;
+        fCommands.throttle = throttle;
+        flight_command_pub->publish(fCommands);
+    }
+
+    //gets to around 1000 in 200 milliseconds
+    while (transformStamped.transform.translation.z <= 0.3)
+    {
+        pastD = currentD;
+        currentD = transformStamped.transform.translation.z;
+        upwardVelocity = currentD - pastD; //upwardVelocity in meters per loop cycle
+        monarc_uart_driver::FlightControl fCommands;
+        fCommands.pitch = 1000;
+        fCommands.roll = 1000;
+        fCommands.yaw = 1000;
+
+
+        throttle = throttle + 10; //turn down the last value to take off slower
+        if (throttle > 1800)
+        {
+            throttle = 1800;
+        }
+        fCommands.throttle = throttle;
+        flight_command_pub->publish(fCommands);
+    }
+
+    approxHover = throttle;
+
+    //These values need tuning
+    double distGain = 50;
+    double velocityGain = 200;
+
+    while(transformStamped.transform.translation.z < takeOffHeight)
+    {
+        pastD = currentD;
+        currentD = transformStamped.transform.translation.z;
+        upwardVelocity = currentD - pastD; //upwardVelocity in meters per loop cycle
+
+        monarc_uart_driver::FlightControl fCommands;
+        fCommands.pitch = 1000;
+        fCommands.roll = 1000;
+        fCommands.yaw = 1000;
+
+        double deltaAlt = takeOffHeight - transformStamped.transform.translation.z;
+
+        fCommands.throttle = int(approxHover+(deltaAlt*distGain)-(upwardVelocity*velocityGain));
+        flight_command_pub->publish(fCommands);
+    }
+}
+
+void peepingTom(ros::Publisher* flight_command_pub, Server* as)
+{
+    double holdingAlt = transformStamped.transform.translation.z;
+    double distGain = 50;
+    double velocityGain = 200;
+    int throttle = 200;
+    double upwardVelocity = 0.0;
+    int pastD = holdingAlt;
+    int currentD = holdingAlt;
+
+    while ( !as->isNewGoalAvailable() )
+    {
+        pastD = currentD;
+        currentD = transformStamped.transform.translation.z;
+        upwardVelocity = currentD - pastD; //upwardVelocity in meters per loop cycle
+
+        monarc_uart_driver::FlightControl fCommands;
+        fCommands.pitch = 1000;
+        fCommands.roll = 1000;
+        fCommands.yaw = 1000;
+
+        double deltaAlt = takeOffHeight - transformStamped.transform.translation.z;
+
+        fCommands.throttle = int(approxHover+(deltaAlt*distGain)-(upwardVelocity*velocityGain));
+        flight_command_pub->publish(fCommands);
+    }
+}
+
+void touchdown(ros::Publisher* flight_command_pub)
+{
+
 }
 
 typedef actionlib::SimpleActionServer<monarc_tf::FlyAction> Server;
@@ -452,15 +560,18 @@ void executeAction(const monarc_tf::FlyGoalConstPtr& goal, Server* as, ros::Publ
   ros::Rate hover_loop(2);
   switch (goal->command) {
     case monarc_tf::FlyGoal::TAKEOFF:
-      // TODO(make decisions based on the command type)
+      enterDangerZone(flight_command_pub);
+      as->setSucceeded();
       std::cout << "TAKEOFF\n";
       break;
     case monarc_tf::FlyGoal::LAND:
       // TODO(make decisions based on the command type)
+      touchdown(flight_command_pub);
       std::cout << "LAND\n";
       break;
     case monarc_tf::FlyGoal::HOVER:
       while (ros::ok() && !as->isNewGoalAvailable()) {
+        peepingTom(flight_command_pub, as);
         std::cout << "HOVER\n";
         hover_loop.sleep();
       }
