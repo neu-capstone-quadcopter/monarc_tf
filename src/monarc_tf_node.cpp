@@ -10,6 +10,8 @@
 #include <geometry_msgs/TransformStamped.h>
 #include <sensor_msgs/PointCloud2.h>
 #include <sensor_msgs/point_cloud2_iterator.h>
+#include "sensor_msgs/Imu.h"
+#include "sensor_msgs/NavSatFix.h"
 
 #include "std_msgs/Float32.h"
 #include "std_msgs/Int32.h"
@@ -53,7 +55,7 @@ double cloudEdges[6];
 
 
 //----------------- IMU Deadreckoning Calculation Variables ------------------//
-int IMUdistAverageNumber = 10; //will calculate distance based on the last <IMUdistAverageNumber> Imu readings
+const int IMUdistAverageNumber = 10; //will calculate distance based on the last <IMUdistAverageNumber> Imu readings
 double accelXData[IMUdistAverageNumber];
 double accelYData[IMUdistAverageNumber];
 double accelZData[IMUdistAverageNumber];
@@ -72,8 +74,8 @@ int accelDataCounter = 0;
 
 
 //------------------------ GPS Localization Variables ------------------------//
-double initialGPScovarianceLatLongReadings = 10.0;
-double initialGPScovarianceAltReadings = 10.0;
+double initialGPScovarianceLatLongReading = 10.0;
+double initialGPScovarianceAltReading = 10.0;
 bool GPSinitialized = false;
 int GPScallbackCount = 0;
 int GPSintializationCount = 60; // this is the number of GPS readings we must
@@ -111,14 +113,14 @@ double radiusOfEarth = (6378137.0 + 6356752.0)/2.0; // Average radius of earth i
 
 //------------------------ Atmospheric Localization Variables ------------------------//
 double currentAtm = 0.0; //Unit is in meters from sea level
-doube atmSmoothingFactor = .8;
+double atmSmoothingFactor = .8;
 
 
 //------------------------ Atmospheric Localization Variables ------------------------//
 
 //------------------------ Ultrasonic Localization Variables ------------------------//
 double currentUltra = 0.0;
-doube ultraSmoothingFactor = 0.4;
+double ultraSmoothingFactor = 0.4;
 //------------------------ Ultrasonic Localization Variables ------------------------//
 int counter = 1;
 
@@ -290,25 +292,6 @@ void pointCloudCallback(const sensor_msgs::PointCloud2& msg)
 
 
 //----------------------- IMU Deadreckoning Functions ------------------------//
-void updateIMUCallback(const sensor_msgs::Imu)
-{
-    accelXData[accelDataCounter] = Imu.linear_acceleration.x;
-    accelYData[accelDataCounter] = Imu.linear_acceleration.y;
-    accelZData[accelDataCounter] = Imu.linear_acceleration.z;
-
-    groundTruthX[accelDataCounter] = transformStamped.transform.translation.x;
-    groundTruthY[accelDataCounter] = transformStamped.transform.translation.y;
-    groundTruthZ[accelDataCounter] = transformStamped.transform.translation.z;
-
-    readingTimes[accelDataCounter] = clock();
-    accelDataCounter++;
-    if (accelDataCounter == IMUdistAverageNumber)
-    {
-        accelDataCounter = 0;
-    }
-    convertAccelToDist();
-}
-
 void convertAccelToDist()
 {
     latestXDistIMU = 0.0;
@@ -329,6 +312,25 @@ void convertAccelToDist()
     latestYDistIMU += groundTruthY[accelDataCounter];
     latestZDistIMU += groundTruthZ[accelDataCounter];
 }
+
+void updateIMUCallback(const sensor_msgs::Imu Imu)
+{
+    accelXData[accelDataCounter] = Imu.linear_acceleration.x;
+    accelYData[accelDataCounter] = Imu.linear_acceleration.y;
+    accelZData[accelDataCounter] = Imu.linear_acceleration.z;
+
+    groundTruthX[accelDataCounter] = transformStamped.transform.translation.x;
+    groundTruthY[accelDataCounter] = transformStamped.transform.translation.y;
+    groundTruthZ[accelDataCounter] = transformStamped.transform.translation.z;
+
+    readingTimes[accelDataCounter] = clock();
+    accelDataCounter++;
+    if (accelDataCounter == IMUdistAverageNumber)
+    {
+        accelDataCounter = 0;
+    }
+    convertAccelToDist();
+}
 //----------------------- IMU Deadreckoning Functions ------------------------//
 
 
@@ -345,7 +347,7 @@ void atomspherCallback(std_msgs::Int32 atm)
 }
 
 //------------------------ GPS Localization Functions ------------------------//
-void updateGPSCallback(const sensor_msgs::NavSatFix::ConstPtr& GPS)
+void updateGPSCallback(const sensor_msgs::NavSatFix & GPS)
 {
     if (GPS.status.status == 1)
     {
@@ -401,7 +403,7 @@ double convertCoordinatesToMeters(double & coordLatest, double & coordOlder)
     return radiusOfEarth * (coordLatest-coordOlder) * PI / 180.0;
 }
 
-void setFirstGPS(const sensor_msgs::NavSatFix::ConstPtr& GPS)
+void setFirstGPS(const sensor_msgs::NavSatFix & GPS)
 {
     //write something that test for gps lock
     //Returns NANs until GPS lock
@@ -439,10 +441,6 @@ void updateTF()
         normalizeAltSensorFactors();
     }
 
-    transformStamped.header.stamp = msg.header.stamp;
-    transformStamped.header.frame_id = "map";
-
-    transformStamped.child_frame_id = msg.header.frame_id;
     transformStamped.transform.translation.x = 0.0;
     transformStamped.transform.translation.y = 0.0;
     transformStamped.transform.translation.z = (IMUAltFactor*latestZDistIMU)+(ultrasonicFactor*currentUltra)+(GPSfactor*currentGPSmetersAlt)+(barometerFactor*currentAtm);

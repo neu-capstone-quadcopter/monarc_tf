@@ -16,6 +16,7 @@ find_package(catkin REQUIRED COMPONENTS
   message_generation
   actionlib_msgs
   actionlib
+  monarc_uart_driver
 )
 
 ## System dependencies are found with CMake's conventions
