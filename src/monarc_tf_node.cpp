@@ -28,6 +28,15 @@
 
 using namespace std;
 #define PI 3.1415926535897932
+geometry_msgs::TransformStamped transformStamped;
+
+//--------------------------- TF Tuning Parameters ---------------------------//
+//this group should add to 1.0
+double IMUAltFactor = 0.1
+double ultrasonicFactor = 0.8
+double GPSfactor = 0.05
+double barometerFactor = 0.05
+//--------------------------- TF Tuning Parameters ---------------------------//
 
 //--------------------------- ROS Published Topics ---------------------------//
 ros::Publisher simpleDist;
@@ -44,13 +53,18 @@ double cloudEdges[6];
 
 
 //----------------- IMU Deadreckoning Calculation Variables ------------------//
-double accelXData[1000];
-double accelYData[1000];
-double accelZData[1000];
+int IMUdistAverageNumber = 10; //will calculate distance based on the last <IMUdistAverageNumber> Imu readings
+double accelXData[IMUdistAverageNumber];
+double accelYData[IMUdistAverageNumber];
+double accelZData[IMUdistAverageNumber];
 
-double latestXDist;
-double latestYDist;
-double latestZDist;
+double groundTruthX[IMUdistAverageNumber];
+double groundTruthY[IMUdistAverageNumber];
+double groundTruthZ[IMUdistAverageNumber];
+
+double latestXDistIMU;
+double latestYDistIMU;
+double latestZDistIMU;
 
 int readingTimes[1000];
 int accelDataCounter = 0;
@@ -63,7 +77,9 @@ double initialGPScovarianceAltReadings = 10.0;
 bool GPSinitialized = false;
 int GPScallbackCount = 0;
 int GPSintializationCount = 60; // this is the number of GPS readings we must
-                                // recieve before taking off.
+                                // recieve before taking off
+double maxLatLongCovariance = 3.0;
+double maxAltCovariance= 4.0;
 
 double currentGPSLong = -71.08841; //Initialized to GPS coordinates of wireless club
 double currentGPSLat = 42.33924;   //Initialized to GPS coordinates of wireless club
@@ -93,8 +109,18 @@ double radiusOfEarth = (6378137.0 + 6356752.0)/2.0; // Average radius of earth i
 //------------------------ GPS Localization Variables ------------------------//
 
 
-int counter = 1;
+//------------------------ Atmospheric Localization Variables ------------------------//
+double currentAtm = 0.0; //Unit is in meters from sea level
+doube atmSmoothingFactor = .8;
 
+
+//------------------------ Atmospheric Localization Variables ------------------------//
+
+//------------------------ Ultrasonic Localization Variables ------------------------//
+double currentUltra = 0.0;
+doube ultraSmoothingFactor = .8;
+//------------------------ Ultrasonic Localization Variables ------------------------//
+int counter = 1;
 
 //-------------------- Point Cloud Localization Functions --------------------//
 void getMinMax(const sensor_msgs::PointCloud2& cloud)
@@ -217,6 +243,10 @@ void pointCloudCallback(const sensor_msgs::PointCloud2& msg)
 // - Buffer all but one subscription, and "drive" the broadcast from one (Chris Likes this option)
 // - Use a Time Synchronizer (http://wiki.ros.org/message_filters#Time_Synchronizer)
 {
+    /*
+    //This code should be commented out until we are ready to use the
+    //camera data once again
+
     static tf2_ros::TransformBroadcaster br;
     getMinMax(msg);
     double width = cloudEdges[2] - cloudEdges[3];
@@ -254,73 +284,105 @@ void pointCloudCallback(const sensor_msgs::PointCloud2& msg)
     callBackCounter.publish(callCount);
     br.sendTransform(transformStamped);
     counter++;
+    */
 }
 //-------------------- Point Cloud Localization Functions --------------------//
 
 
 //----------------------- IMU Deadreckoning Functions ------------------------//
-void updateIMUCallback(const std_msgs::Int32 IMU)
+void updateIMUCallback(const sensor_msgs::Imu)
 {
-    cout << "IMU Data Structure:" << IMU.data << "\n";
+    accelXData[accelDataCounter] = Imu.linear_acceleration.x;
+    accelYData[accelDataCounter] = Imu.linear_acceleration.y;
+    accelZData[accelDataCounter] = Imu.linear_acceleration.z;
+
+    groundTruthX[accelDataCounter] = transformStamped.transform.translation.x;
+    groundTruthY[accelDataCounter] = transformStamped.transform.translation.y;
+    groundTruthZ[accelDataCounter] = transformStamped.transform.translation.z;
+
     readingTimes[accelDataCounter] = clock();
+    accelDataCounter++;
+    if (accelDataCounter == IMUdistAverageNumber)
+    {
+        accelDataCounter = 0;
+    }
+    convertAccelToDist();
 }
 
 void convertAccelToDist()
 {
-    latestXDist = 0.0;
-    latestYDist = 0.0;
-    latestZDist = 0.0;
+    latestXDistIMU = 0.0;
+    latestYDistIMU = 0.0;
+    latestZDistIMU = 0.0;
     //function uses trapezoidal rule
-    for ( int i = 0; i < (accelDataCounter-1); i++ )
+    for ( int i = 0; i < (IMUdistAverageNumber-1); i++ )
     {
-        latestXDist = accelXData[i]+accelXData[i+1]*(readingTimes[i+1]-readingTimes[i])*(readingTimes[i+1]-readingTimes[i]);
-        latestYDist = accelYData[i]+accelXData[i+1]*(readingTimes[i+1]-readingTimes[i])*(readingTimes[i+1]-readingTimes[i]);
-        latestZDist = accelZData[i]+accelXData[i+1]*(readingTimes[i+1]-readingTimes[i])*(readingTimes[i+1]-readingTimes[i]);
+        latestXDistIMU = accelXData[i]+accelXData[i+1]*(readingTimes[i+1]-readingTimes[i])*(readingTimes[i+1]-readingTimes[i]);
+        latestYDistIMU = accelYData[i]+accelXData[i+1]*(readingTimes[i+1]-readingTimes[i])*(readingTimes[i+1]-readingTimes[i]);
+        latestZDistIMU = accelZData[i]+accelXData[i+1]*(readingTimes[i+1]-readingTimes[i])*(readingTimes[i+1]-readingTimes[i]);
     }
-    latestXDist /= (2*CLOCKS_PER_SEC*CLOCKS_PER_SEC);
-    latestYDist /= (2*CLOCKS_PER_SEC*CLOCKS_PER_SEC);
-    latestZDist /= (2*CLOCKS_PER_SEC*CLOCKS_PER_SEC);
+    latestXDistIMU /= (2*CLOCKS_PER_SEC*CLOCKS_PER_SEC);
+    latestYDistIMU /= (2*CLOCKS_PER_SEC*CLOCKS_PER_SEC);
+    latestZDistIMU /= (2*CLOCKS_PER_SEC*CLOCKS_PER_SEC);
+
+    latestXDistIMU += groundTruthX[accelDataCounter];
+    latestYDistIMU += groundTruthY[accelDataCounter];
+    latestZDistIMU += groundTruthZ[accelDataCounter];
 }
 //----------------------- IMU Deadreckoning Functions ------------------------//
 
 
-//------------------------ GPS Localization Functions ------------------------//
-void updateGPSCallback(const std_msgs::Int32 GPS)
+void ultraSoundCallback(std_msgs::Int32 ultraAlt)
 {
-    if (GPSinitialized)
+    //ground is 190, units are millimeters
+    currentAtm = (ultraAlt.data*(ultraSmoothingFactor))+(currentUltra*(1.0-ultraSmoothingFactor));
+}
+
+void atomspherCallback(std_msgs::Int32 atm)
+{
+    //units are in meters
+    currentAtm = (atm.data*(atmSmoothingFactor))+(currentAtm*(1.0-atmSmoothingFactor));
+}
+
+//------------------------ GPS Localization Functions ------------------------//
+void updateGPSCallback(const sensor_msgs::NavSatFix::ConstPtr& GPS)
+{
+    if (GPS.status.status == 1)
     {
-        lastGPSLong = currentGPSLong; //These variables log the last GPS coordinates
-        lastGPSLat = currentGPSLat;
-        lastGPSAlt = currentGPSAlt;
-        lastCovarianceLatLong = currentCovarianceLatLong;
-        lastCovarianceAlt = currentCovarianceAlt;
+        if (GPSinitialized)
+        {
+            lastGPSLong = currentGPSLong; //These variables log the last GPS coordinates
+            lastGPSLat = currentGPSLat;
+            lastGPSAlt = currentGPSAlt;
+            lastCovarianceLatLong = currentCovarianceLatLong;
+            lastCovarianceAlt = currentCovarianceAlt;
 
-        currentGPSLat = GPS.latitude;
-        currentGPSLong = GPS.longitude;
-        currentGPSAlt = GPS.altitude;
-        currentCovarianceLatLong = GPS.position_covariance[0];
-        currentCovarianceAlt = GPS.position_covariance[8];
-
-    } else {
-        // Everything in this else is to initialize the GPS values
-        if (GPS.position_covariance[0] < initialGPScovarianceLatLongReading)
-        {
-            initialGPScovarianceLatLongReading = GPS.position_covariance[0];
-            originGPSlat = GPS.latitude;
-            originGPSlong = GPS.longitude;
-        }
-        if ( GPS.position_covariance[8] < initialGPScovarianceAltReading)
-        {
-            initialGPScovarianceAltReading = GPS.position_covariance[8];
-            originGPSalt = GPS.altitude;
-        }
-        GPScallbackCount += 1;
-        if (GPScallbackCount == GPSintializationCount)
-        {
-            GPSinitialized = true;
-            currentGPSLat = originGPSlat;
-            currentGPSLong = originGPSlong;
-            currentGPSAlt = originGPSalt;
+            currentGPSLat = GPS.latitude;
+            currentGPSLong = GPS.longitude;
+            currentGPSAlt = GPS.altitude;
+            currentCovarianceLatLong = GPS.position_covariance[0];
+            currentCovarianceAlt = GPS.position_covariance[8];
+        } else {
+            // Everything in this else is to initialize the GPS values
+            if (GPS.position_covariance[0] < initialGPScovarianceLatLongReading)
+            {
+                initialGPScovarianceLatLongReading = GPS.position_covariance[0];
+                originGPSlat = GPS.latitude;
+                originGPSlong = GPS.longitude;
+            }
+            if ( GPS.position_covariance[8] < initialGPScovarianceAltReading)
+            {
+                initialGPScovarianceAltReading = GPS.position_covariance[8];
+                originGPSalt = GPS.altitude;
+            }
+            GPScallbackCount += 1;
+            if (GPScallbackCount == GPSintializationCount)
+            {
+                GPSinitialized = true;
+                currentGPSLat = originGPSlat;
+                currentGPSLong = originGPSlong;
+                currentGPSAlt = originGPSalt;
+            }
         }
     }
 }
@@ -339,7 +401,7 @@ double convertCoordinatesToMeters(double & coordLatest, double & coordOlder)
     return radiusOfEarth * (coordLatest-coordOlder) * PI / 180.0;
 }
 
-void setFirstGPS(const std_msgs::Int32 GPS)
+void setFirstGPS(const sensor_msgs::NavSatFix::ConstPtr& GPS)
 {
     //write something that test for gps lock
     //Returns NANs until GPS lock
@@ -352,7 +414,16 @@ void setFirstGPS(const std_msgs::Int32 GPS)
 }
 //------------------------ GPS Localization Functions ------------------------//
 
+void updateTF()
+{
+    transformStamped.header.stamp = msg.header.stamp;
+    transformStamped.header.frame_id = "map";
 
+    transformStamped.child_frame_id = msg.header.frame_id;
+    transformStamped.transform.translation.x = 0.0;
+    transformStamped.transform.translation.y = 0.0;
+    transformStamped.transform.translation.z = (IMUAltFactor*latestZDistIMU)+(ultrasonicFactor*currentUltra)+(GPSfactor*currentGPSmetersAlt)+(barometerFactor*currentAtm);
+}
 
 typedef actionlib::SimpleActionServer<monarc_tf::FlyAction> Server;
 
@@ -393,18 +464,34 @@ void executeAction(const monarc_tf::FlyGoalConstPtr& goal, Server* as, ros::Publ
 }
 
 int main(int argc, char** argv){
-  ros::init(argc, argv, "monarc_tf_node");
-  ros::NodeHandle node;
-  simpleDist = node.advertise<std_msgs::Float32>("simpleDist", 0.0);
-  callBackCounter = node.advertise<std_msgs::Int32>("callbackCount", 0);
-  ros::Subscriber IMUsub = node.subscribe("/IMU", 10, updateIMUCallback);
-  ros::Subscriber GPSsub = node.subscribe("/GPS", 10, updateGPSCallback);
-  ros::Subscriber sub = node.subscribe("/points2", 10, pointCloudCallback);
+    ros::init(argc, argv, "monarc_tf_node");
+    ros::NodeHandle node;
+    simpleDist = node.advertise<std_msgs::Float32>("simpleDist", 0.0);
+    callBackCounter = node.advertise<std_msgs::Int32>("callbackCount", 0);
 
-  ros::Publisher flight_command_pub = node.advertise<monarc_uart_driver::FlightControl>("flight_control", 10);
-  Server server(node, "fly", boost::bind(&executeAction, _1, &server, &flight_command_pub), false);
-  server.start();
+    ros::Subscriber IMUsub = node.subscribe("/IMU", 10, updateIMUCallback);
+    ros::Subscriber GPSsub = node.subscribe("/fix", 10, updateGPSCallback);
+    ros::Subscriber ultsub = node.subscribe("/ultrasonic_altitude", 10, ultraSoundCallback);
+    ros::Subscriber atosub = node.subscribe("/atmospheric_pressure", 10, atomspherCallback);
+    //ros::Subscriber Camsub = node.subscribe("/points2", 10, pointCloudCallback); //disabled till after up down test flight
 
-  ros::spin();
-  return 0;
+    ros::Publisher flight_command_pub = node.advertise<monarc_uart_driver::FlightControl>("flight_control", 10);
+    Server server(node, "fly", boost::bind(&executeAction, _1, &server, &flight_command_pub), false);
+    server.start();
+
+    ros::Rate loop_rate(100);
+
+    while (ros::ok()) {
+        /*
+        * Process all callbacks, which will populate nav_cpu_state.
+        */
+        ros::spinOnce();
+        updateTF();
+
+        /*
+        * Sleep for the remainder of the interval.
+        */
+        loop_rate.sleep();
+    }
+    return 0;
 };
