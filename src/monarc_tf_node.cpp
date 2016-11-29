@@ -31,11 +31,11 @@ using namespace std;
 geometry_msgs::TransformStamped transformStamped;
 
 //--------------------------- TF Tuning Parameters ---------------------------//
-//this group should add to 1.0
-double IMUAltFactor = 0.1
-double ultrasonicFactor = 0.8
-double GPSfactor = 0.05
-double barometerFactor = 0.05
+//these are simply default values
+double IMUAltFactor = 0.1;
+double ultrasonicFactor = 0.8;
+double GPSfactor = 0.05;
+double barometerFactor = 0.05;
 //--------------------------- TF Tuning Parameters ---------------------------//
 
 //--------------------------- ROS Published Topics ---------------------------//
@@ -118,7 +118,7 @@ doube atmSmoothingFactor = .8;
 
 //------------------------ Ultrasonic Localization Variables ------------------------//
 double currentUltra = 0.0;
-doube ultraSmoothingFactor = .8;
+doube ultraSmoothingFactor = 0.4;
 //------------------------ Ultrasonic Localization Variables ------------------------//
 int counter = 1;
 
@@ -414,8 +414,31 @@ void setFirstGPS(const sensor_msgs::NavSatFix::ConstPtr& GPS)
 }
 //------------------------ GPS Localization Functions ------------------------//
 
+void normalizeAltSensorFactors()
+{
+    double total = IMUAltFactor + ultrasonicFactor + GPSfactor + barometerFactor;
+    IMUAltFactor /= total;
+    ultrasonicFactor /= total;
+    GPSfactor /= total;
+    barometerFactor /= total;
+}
+
 void updateTF()
 {
+    if (currentUltra < 5.0)
+    {
+        IMUAltFactor = 0.0;
+        ultrasonicFactor = 1.0;
+        GPSfactor = 0.0;
+        barometerFactor = 0.0;
+    } else {
+        IMUAltFactor = 0.0;       //Set to some sort of std deviation
+        ultrasonicFactor = 1.0;   //Don't use if further away than 5 meters
+        GPSfactor = 0.0;          //Base
+        barometerFactor = 0.0;
+        normalizeAltSensorFactors();
+    }
+
     transformStamped.header.stamp = msg.header.stamp;
     transformStamped.header.frame_id = "map";
 
