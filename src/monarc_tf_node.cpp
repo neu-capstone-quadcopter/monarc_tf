@@ -203,13 +203,13 @@ double getMiddleAverage(const sensor_msgs::PointCloud2& cloud, double totalW, do
 //to right and then from top to bottom, so it will
 //have the entire first row first in order.
 {
-	int right = centerW+(totalW*percentSize/2);
-	int left = centerW-(totalW*percentSize/2);
-	int top = centerH+(totalH*percentSize/2);
-    int bottom = centerH-(totalH*percentSize/2);
+  int right = centerW+(totalW*percentSize/2);
+  int left = centerW-(totalW*percentSize/2);
+  int top = centerH+(totalH*percentSize/2);
+  int bottom = centerH-(totalH*percentSize/2);
 
-	double count = 0.0;
-	double totalDepth = 0.0;
+  double count = 0.0;
+  double totalDepth = 0.0;
 
   sensor_msgs::PointCloud2ConstIterator<float> iter_x(cloud, "x");
   sensor_msgs::PointCloud2ConstIterator<float> iter_y(cloud, "y");
@@ -231,11 +231,11 @@ double getMiddleAverage(const sensor_msgs::PointCloud2& cloud, double totalW, do
       }
     }
   }
-	if (count < 1.0)
-	{
-		return 0.0;
-	}
-	return totalDepth/count;
+  if (count < 1.0)
+  {
+    return 0.0;
+  }
+  return totalDepth/count;
 }
 
 
@@ -355,6 +355,21 @@ void atomspherCallback(std_msgs::Int32 atm)
 }
 
 //------------------------ GPS Localization Functions ------------------------//
+
+double convertCoordinatesToMeters(double & coordLatest, double & coordOlder)
+{
+    //I based these calculations on the earth being
+    //a perfect sphere. Since we are traveling small
+    //distances relative to the ellipsoidal nature
+    //of the earth, doing the extra calculation for
+    //an ellipsoid is a waste. Also, in this orientation
+    //North, East and Up are the positive directions on
+    //the grid. This convetnion is transformed when
+    //converting to ROS coordinate system, because
+    //West or left is positive in that grid.
+    return radiusOfEarth * (coordLatest-coordOlder) * PI / 180.0;
+}
+
 void updateGPSCallback(const sensor_msgs::NavSatFix & GPS)
 {
     if (GPS.status.status == 1)
@@ -400,20 +415,6 @@ void updateGPSCallback(const sensor_msgs::NavSatFix & GPS)
         currentGPSmetersLong = convertCoordinatesToMeters(currentGPSLong, originGPSlong);
         currentGPSmetersAlt = currentGPSAlt - originGPSalt; //This makes the take off altitude zero which matches it to the barometer
     }
-}
-
-double convertCoordinatesToMeters(double & coordLatest, double & coordOlder)
-{
-    //I based these calculations on the earth being
-    //a perfect sphere. Since we are traveling small
-    //distances relative to the ellipsoidal nature
-    //of the earth, doing the extra calculation for
-    //an ellipsoid is a waste. Also, in this orientation
-    //North, East and Up are the positive directions on
-    //the grid. This convetnion is transformed when
-    //converting to ROS coordinate system, because
-    //West or left is positive in that grid.
-    return radiusOfEarth * (coordLatest-coordOlder) * PI / 180.0;
 }
 
 //------------------------ GPS Localization Functions ------------------------//
@@ -464,7 +465,8 @@ void enterDangerZone(ros::Publisher* flight_command_pub)
     int currentD = 0;
 
     //slowly bring up throttle to 600, about 4 seconds
-    while (throttle < 600)
+    ros::Rate loop_rate(100);
+    while (throttle < 600 && ros::ok())
     {
         monarc_uart_driver::FlightControl fCommands;
         fCommands.pitch = 1000;
@@ -474,10 +476,11 @@ void enterDangerZone(ros::Publisher* flight_command_pub)
         throttle = throttle + 1;
         fCommands.throttle = throttle;
         flight_command_pub->publish(fCommands);
+        loop_rate.sleep();
     }
 
     //gets to around 1000 in 200 milliseconds
-    while (transformStamped.transform.translation.z <= 0.3)
+    while (transformStamped.transform.translation.z <= 0.3 && ros::ok())
     {
         pastD = currentD;
         currentD = transformStamped.transform.translation.z;
@@ -495,6 +498,7 @@ void enterDangerZone(ros::Publisher* flight_command_pub)
         }
         fCommands.throttle = throttle;
         flight_command_pub->publish(fCommands);
+        loop_rate.sleep();
     }
 
     approxHover = throttle;
@@ -503,7 +507,7 @@ void enterDangerZone(ros::Publisher* flight_command_pub)
     double distGain = 50;
     double velocityGain = 200;
 
-    while(transformStamped.transform.translation.z < takeOffHeight)
+    while(transformStamped.transform.translation.z < takeOffHeight && ros::ok())
     {
         pastD = currentD;
         currentD = transformStamped.transform.translation.z;
@@ -518,8 +522,16 @@ void enterDangerZone(ros::Publisher* flight_command_pub)
 
         fCommands.throttle = int(approxHover+(deltaAlt*distGain)-(upwardVelocity*velocityGain));
         flight_command_pub->publish(fCommands);
+        loop_rate.sleep();
     }
 }
+
+void touchdown(ros::Publisher* flight_command_pub)
+{
+
+}
+
+typedef actionlib::SimpleActionServer<monarc_tf::FlyAction> Server;
 
 void peepingTom(ros::Publisher* flight_command_pub, Server* as)
 {
@@ -531,8 +543,10 @@ void peepingTom(ros::Publisher* flight_command_pub, Server* as)
     int pastD = holdingAlt;
     int currentD = holdingAlt;
 
-    while ( !as->isNewGoalAvailable() )
+    ros::Rate loop_rate(100);
+    while ( ros::ok() && !as->isNewGoalAvailable() )
     {
+        ROS_INFO("Hovering");
         pastD = currentD;
         currentD = transformStamped.transform.translation.z;
         upwardVelocity = currentD - pastD; //upwardVelocity in meters per loop cycle
@@ -546,54 +560,29 @@ void peepingTom(ros::Publisher* flight_command_pub, Server* as)
 
         fCommands.throttle = int(approxHover+(deltaAlt*distGain)-(upwardVelocity*velocityGain));
         flight_command_pub->publish(fCommands);
+        loop_rate.sleep();
     }
 }
 
-void touchdown(ros::Publisher* flight_command_pub)
-{
-
-}
-
-typedef actionlib::SimpleActionServer<monarc_tf::FlyAction> Server;
-
 void executeAction(const monarc_tf::FlyGoalConstPtr& goal, Server* as, ros::Publisher* flight_command_pub) {
-  ros::Rate hover_loop(2);
   switch (goal->command) {
     case monarc_tf::FlyGoal::TAKEOFF:
+      ROS_INFO("Taking off!");
       enterDangerZone(flight_command_pub);
       as->setSucceeded();
-      std::cout << "TAKEOFF\n";
-      break;
+      return;
     case monarc_tf::FlyGoal::LAND:
-      // TODO(make decisions based on the command type)
+      ROS_INFO("Landing!");
       touchdown(flight_command_pub);
-      std::cout << "LAND\n";
-      break;
+      as->setSucceeded();
+      return;
     case monarc_tf::FlyGoal::HOVER:
-      while (ros::ok() && !as->isNewGoalAvailable()) {
-        peepingTom(flight_command_pub, as);
-        std::cout << "HOVER\n";
-        hover_loop.sleep();
-      }
-      ROS_INFO("HOVER CANCELLED");
+      peepingTom(flight_command_pub, as);
       as->setPreempted();
       return;
     default:
       throw std::invalid_argument("unhandled command type");
   }
-
-  int wait = 0;
-  ros::Rate loop_rate(100);
-  while (ros::ok()) {
-    // TODO read shit from data sources and make decisions. Publish on flight_command_pub.
-    loop_rate.sleep();
-    if (wait > 200) {
-      break;
-    }
-    wait++;
-  }
-
-  as->setSucceeded();
 }
 
 int main(int argc, char** argv){
