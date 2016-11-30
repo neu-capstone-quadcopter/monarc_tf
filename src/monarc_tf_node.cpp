@@ -1,6 +1,7 @@
 #include <iostream>
 #include <math.h>
 #include <stdexcept>
+#include <mutex>
 
 #include <ros/ros.h>
 #include <ros/console.h>
@@ -31,6 +32,7 @@
 using namespace std;
 #define PI 3.1415926535897932
 geometry_msgs::TransformStamped transformStamped;
+std::mutex tfLock;
 
 //--------------------------- TF Tuning Parameters ---------------------------//
 //these are simply default values
@@ -428,8 +430,16 @@ void normalizeAltSensorFactors()
     barometerFactor /= total;
 }
 
+void setTranslationTransform(){
+    std::lock_guard<std::mutex> guard(tfLock);
+    transformStamped.transform.translation.x = currentGPSmetersLat;
+    transformStamped.transform.translation.y = currentGPSmetersLong;
+    transformStamped.transform.translation.z = (IMUAltFactor*latestZDistIMU)+(ultrasonicFactor*currentUltra)+(GPSfactor*currentGPSmetersAlt)+(barometerFactor*currentAtm);
+}
+
 void updateTF()
 {
+
     if (currentUltra < 5.0)
     {
         IMUAltFactor = 0.0;
@@ -444,15 +454,18 @@ void updateTF()
         normalizeAltSensorFactors();
     }
 
-    transformStamped.transform.translation.x = currentGPSmetersLat;
-    transformStamped.transform.translation.y = currentGPSmetersLong;
-    transformStamped.transform.translation.z = (IMUAltFactor*latestZDistIMU)+(ultrasonicFactor*currentUltra)+(GPSfactor*currentGPSmetersAlt)+(barometerFactor*currentAtm);
-
+    setTranslationTransform();
     //TODO set these to the value coming orientation
     transformStamped.transform.rotation.x = 0;
     transformStamped.transform.rotation.y = 0;
     transformStamped.transform.rotation.z = 0;
     transformStamped.transform.rotation.w = 0;
+}
+
+double getCurrentZ()
+{
+    std::lock_guard<std::mutex> guard(tfLock);
+    return transformStamped.transform.translation.z;
 }
 
 void enterDangerZone(ros::Publisher* flight_command_pub)
@@ -462,7 +475,7 @@ void enterDangerZone(ros::Publisher* flight_command_pub)
     int throttle = 200;
     double upwardVelocity = 0.0;
     int pastD = 0;
-    int currentD = 0;
+    int currentD = getCurrentZ();
 
     //slowly bring up throttle to 600, about 4 seconds
     ros::Rate loop_rate(100);
@@ -480,10 +493,10 @@ void enterDangerZone(ros::Publisher* flight_command_pub)
     }
 
     //gets to around 1000 in 200 milliseconds
-    while (transformStamped.transform.translation.z <= 0.3 && ros::ok())
+    while (currentD <= 0.3 && ros::ok())
     {
         pastD = currentD;
-        currentD = transformStamped.transform.translation.z;
+        currentD = getCurrentZ();
         upwardVelocity = currentD - pastD; //upwardVelocity in meters per loop cycle
         monarc_uart_driver::FlightControl fCommands;
         fCommands.pitch = 1000;
@@ -501,16 +514,17 @@ void enterDangerZone(ros::Publisher* flight_command_pub)
         loop_rate.sleep();
     }
 
-    approxHover = throttle;
+    approxHover = 920;
 
     //These values need tuning
     double distGain = 50;
     double velocityGain = 200;
+    double deltaAlt = 0;
 
-    while(transformStamped.transform.translation.z < takeOffHeight && ros::ok())
+    while(currentD < takeOffHeight && ros::ok())
     {
         pastD = currentD;
-        currentD = transformStamped.transform.translation.z;
+        currentD = getCurrentZ();
         upwardVelocity = currentD - pastD; //upwardVelocity in meters per loop cycle
 
         monarc_uart_driver::FlightControl fCommands;
@@ -518,7 +532,7 @@ void enterDangerZone(ros::Publisher* flight_command_pub)
         fCommands.roll = 1000;
         fCommands.yaw = 1000;
 
-        double deltaAlt = takeOffHeight - transformStamped.transform.translation.z;
+        deltaAlt = takeOffHeight - currentD;
 
         fCommands.throttle = int(approxHover+(deltaAlt*distGain)-(upwardVelocity*velocityGain));
         flight_command_pub->publish(fCommands);
@@ -533,9 +547,10 @@ void touchdown(ros::Publisher* flight_command_pub)
 
 typedef actionlib::SimpleActionServer<monarc_tf::FlyAction> Server;
 
+
 void peepingTom(ros::Publisher* flight_command_pub, Server* as)
 {
-    double holdingAlt = transformStamped.transform.translation.z;
+    double holdingAlt = 1.0; //This is the altitude we want to hold in meters
     double distGain = 50;
     double velocityGain = 200;
     int throttle = 200;
@@ -544,11 +559,14 @@ void peepingTom(ros::Publisher* flight_command_pub, Server* as)
     int currentD = holdingAlt;
 
     ros::Rate loop_rate(100);
+
+
     while ( ros::ok() && !as->isNewGoalAvailable() )
     {
         ROS_INFO("Hovering");
         pastD = currentD;
-        currentD = transformStamped.transform.translation.z;
+        currentD = getCurrentZ();
+
         upwardVelocity = currentD - pastD; //upwardVelocity in meters per loop cycle
 
         monarc_uart_driver::FlightControl fCommands;
@@ -556,7 +574,7 @@ void peepingTom(ros::Publisher* flight_command_pub, Server* as)
         fCommands.roll = 1000;
         fCommands.yaw = 1000;
 
-        double deltaAlt = takeOffHeight - transformStamped.transform.translation.z;
+        double deltaAlt = takeOffHeight - currentD;
 
         fCommands.throttle = int(approxHover+(deltaAlt*distGain)-(upwardVelocity*velocityGain));
         flight_command_pub->publish(fCommands);
