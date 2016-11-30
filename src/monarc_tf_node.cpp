@@ -35,8 +35,8 @@ geometry_msgs::TransformStamped transformStamped;
 std::mutex tfLock;
 
 //These values need tuning
-double distGain = 124;
-double velocityGain = 500;
+double distGain = 350.0; //124 was the origional value
+double velocityGain = 500.0;
 int approxHover = 920; //throttle at which hovering occurs approximatly
 int centerYaw = 992;
 int centerPitch = 992;
@@ -490,9 +490,9 @@ void enterDangerZone(ros::Publisher* flight_command_pub)
     while (throttle < 600 && ros::ok())
     {
         monarc_uart_driver::FlightControl fCommands;
-        fCommands.pitch = 1000;
-        fCommands.roll = 1000;
-        fCommands.yaw = 1000;
+        fCommands.pitch = centerPitch;
+        fCommands.roll = centerRoll;
+        fCommands.yaw = centerYaw;
 
         throttle = throttle + 1;
         fCommands.throttle = throttle;
@@ -536,6 +536,7 @@ void enterDangerZone(ros::Publisher* flight_command_pub)
     }
 
     double deltaAlt = 0;
+    double holdingAlt = 0.3;
 
     while(currentD < takeOffHeight && ros::ok())
     {
@@ -548,7 +549,8 @@ void enterDangerZone(ros::Publisher* flight_command_pub)
         fCommands.roll = centerRoll;
         fCommands.yaw = centerYaw;
 
-        deltaAlt = takeOffHeight - currentD;
+        deltaAlt = holdingAlt - currentD;
+        holdingAlt += 0.02;
 
         fCommands.throttle = int(approxHover+(deltaAlt*distGain)-(upwardVelocity*velocityGain));
 
@@ -562,6 +564,7 @@ void enterDangerZone(ros::Publisher* flight_command_pub)
         }
 
         flight_command_pub->publish(fCommands);
+
         loop_rate.sleep();
     }
 }
