@@ -37,6 +37,8 @@ std::mutex tfLock;
 //These values need tuning
 double distGain; //124 was the origional value
 double velocityGain;
+double liftoffConfirmationAltitude;
+double initialHoldingAltitude;
 int approxHover = 920; //throttle at which hovering occurs approximatly
 int centerYaw = 992;
 int centerPitch = 992;
@@ -49,9 +51,13 @@ void set_params() {
 
   param_handle.param("dist_gain", distGain, 1000.0);
   param_handle.param("velocity_gain", velocityGain, 500.0);
+  param_handle.param("liftoff_confirmation_altitude", liftoffConfirmationAltitude, 0.1);
+  param_handle.param("initial_holding_altitude", initialHoldingAltitude, 0.2);
 
   ROS_INFO("monarc_tf using dist gain: %f", distGain);
   ROS_INFO("monarc_tf using velocity gain: %f", velocityGain);
+  ROS_INFO("monarc_tf using liftoff confirmation altitude: %f", liftoffConfirmationAltitude);
+  ROS_INFO("monarc_tf using initial holding altitude: %f", initialHoldingAltitude);
 }
 
 //--------------------------- TF Tuning Parameters ---------------------------//
@@ -521,7 +527,7 @@ void enterDangerZone(ros::Publisher* flight_command_pub)
 
     //gets to around 1000 in 200 milliseconds
     ROS_INFO("----- Take Off Stage 2 -----");
-    while (currentD <= 0.12 && ros::ok())
+    while (currentD <= liftoffConfirmationAltitude && ros::ok())
     {
         pastD = currentD;
         currentD = getCurrentZ();
@@ -548,7 +554,7 @@ void enterDangerZone(ros::Publisher* flight_command_pub)
     }
 
     double deltaAlt = 0;
-    double holdingAlt = 0.1;
+    double holdingAlt = initialHoldingAltitude;
 
     ROS_INFO("----- Take Off Stage 3 -----");
     while(currentD < takeOffHeight && ros::ok())
