@@ -35,14 +35,24 @@ geometry_msgs::TransformStamped transformStamped;
 std::mutex tfLock;
 
 //These values need tuning
-double distGain = 350.0; //124 was the origional value
-double velocityGain = 500.0;
+double distGain; //124 was the origional value
+double velocityGain;
 int approxHover = 920; //throttle at which hovering occurs approximatly
 int centerYaw = 992;
 int centerPitch = 992;
 int centerRoll = 992;
 int maxThrottleValue = 1800;
 int minThrottleValue = 8;
+
+void set_params() {
+  ros::NodeHandle param_handle("~");
+
+  param_handle.param("dist_gain", distGain, 1000.0);
+  param_handle.param("velocity_gain", velocityGain, 500.0);
+
+  ROS_INFO("monarc_tf using dist gain: %f", distGain);
+  ROS_INFO("monarc_tf using velocity gain: %f", velocityGain);
+}
 
 //--------------------------- TF Tuning Parameters ---------------------------//
 //these are simply default values
@@ -511,7 +521,7 @@ void enterDangerZone(ros::Publisher* flight_command_pub)
 
     //gets to around 1000 in 200 milliseconds
     ROS_INFO("----- Take Off Stage 2 -----");
-    while (currentD <= 0.1 && ros::ok())
+    while (currentD <= 0.12 && ros::ok())
     {
         pastD = currentD;
         currentD = getCurrentZ();
@@ -689,6 +699,8 @@ void executeAction(const monarc_tf::FlyGoalConstPtr& goal, Server* as, ros::Publ
 int main(int argc, char** argv){
     ros::init(argc, argv, "monarc_tf_node");
     ros::NodeHandle node;
+    set_params();
+
     simpleDist = node.advertise<std_msgs::Float32>("simpleDist", 0.0);
     callBackCounter = node.advertise<std_msgs::Int32>("callbackCount", 0);
 
