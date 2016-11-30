@@ -487,6 +487,7 @@ void enterDangerZone(ros::Publisher* flight_command_pub)
 
     //slowly bring up throttle to 600, about 4 seconds
     ros::Rate loop_rate(100);
+    ROS_INFO("----- Take Off Stage 1 -----");
     while (throttle < 500 && ros::ok())
     {
         monarc_uart_driver::FlightControl fCommands;
@@ -509,6 +510,7 @@ void enterDangerZone(ros::Publisher* flight_command_pub)
     }
 
     //gets to around 1000 in 200 milliseconds
+    ROS_INFO("----- Take Off Stage 2 -----");
     while (currentD <= 0.1 && ros::ok())
     {
         pastD = currentD;
@@ -538,6 +540,7 @@ void enterDangerZone(ros::Publisher* flight_command_pub)
     double deltaAlt = 0;
     double holdingAlt = 0.1;
 
+    ROS_INFO("----- Take Off Stage 3 -----");
     while(currentD < takeOffHeight && ros::ok())
     {
         pastD = currentD;
@@ -550,7 +553,7 @@ void enterDangerZone(ros::Publisher* flight_command_pub)
         fCommands.yaw = centerYaw;
 
         deltaAlt = holdingAlt - currentD;
-        holdingAlt += 0.005;
+        holdingAlt += 0.0005;
 
         fCommands.throttle = int(approxHover+(deltaAlt*distGain)-(upwardVelocity*velocityGain));
 
