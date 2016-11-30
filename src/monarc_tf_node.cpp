@@ -50,7 +50,7 @@ double IMUAltFactor = 0.1;
 double ultrasonicFactor = 0.8;
 double GPSfactor = 0.05;
 double barometerFactor = 0.05;
-double takeOffHeight = 3.0;
+double takeOffHeight = 1.0;
 //--------------------------- TF Tuning Parameters ---------------------------//
 
 //--------------------------- ROS Published Topics ---------------------------//
@@ -133,7 +133,7 @@ double atmSmoothingFactor = .8;
 
 //------------------------ Ultrasonic Localization Variables ------------------------//
 double currentUltra = 0.0;
-double ultraSmoothingFactor = 0.4;
+double ultraSmoothingFactor = 1.0;
 //------------------------ Ultrasonic Localization Variables ------------------------//
 int counter = 1;
 
@@ -350,7 +350,7 @@ void updateIMUCallback(const sensor_msgs::Imu Imu)
 void ultraSoundCallback(std_msgs::Int32 ultraAlt)
 {
     //ground is approx 190, units are millimeters
-    currentUltra = ((ultraAlt.data*(ultraSmoothingFactor))+(currentUltra*(1.0-ultraSmoothingFactor))-190.0)/1000.0;
+    currentUltra = ((ultraAlt.data*ultraSmoothingFactor + currentUltra*(1.0-ultraSmoothingFactor))-190.0)/1000.0;
 }
 
 void atomspherCallback(std_msgs::Int32 atm)
@@ -482,8 +482,8 @@ void enterDangerZone(ros::Publisher* flight_command_pub)
     //from about 200 to 1800
     int throttle = 200;
     double upwardVelocity = 0.0;
-    int pastD = 0;
-    int currentD = getCurrentZ();
+    double pastD = 0;
+    double currentD = getCurrentZ();
 
     //slowly bring up throttle to 600, about 4 seconds
     ros::Rate loop_rate(100);
@@ -568,14 +568,15 @@ void enterDangerZone(ros::Publisher* flight_command_pub)
 
 void touchdown(ros::Publisher* flight_command_pub)
 {
-    double holdingAlt = 1.0; //This is the altitude we want to hold in meters
     double upwardVelocity = 0.0;
-    int pastD = getCurrentZ();
-    int currentD = pastD;
+    double pastD = getCurrentZ();
+    double currentD = pastD;
+    double holdingAlt = currentD; //This is the altitude we want to hold in meters
 
     ros::Rate loop_rate(100);
 
     monarc_uart_driver::FlightControl fCommands;
+    ROS_INFO("Landing @ %f", holdingAlt);
     while ( ros::ok() && holdingAlt > 0.02 )
     {
         ROS_INFO("Landing");
@@ -584,7 +585,7 @@ void touchdown(ros::Publisher* flight_command_pub)
 
         upwardVelocity = currentD - pastD; //upwardVelocity in meters per loop cycle
 
-        if (upwardVelocity == 0)
+        if (currentD - holdingAlt <= 0.02 && currentD - holdingAlt >= -0.02)
         {
             holdingAlt *= 0.90;
         }
@@ -592,9 +593,10 @@ void touchdown(ros::Publisher* flight_command_pub)
         fCommands.roll = centerRoll;
         fCommands.yaw = centerYaw;
 
-        double deltaAlt = takeOffHeight - currentD;
+        double deltaAlt = holdingAlt - currentD;
 
         fCommands.throttle = int(approxHover+(deltaAlt*distGain)-(upwardVelocity*velocityGain));
+        ROS_INFO("%d  %f  %f", fCommands.throttle, (deltaAlt*distGain), (upwardVelocity*velocityGain));
         if (fCommands.throttle > maxThrottleValue)
         {
             fCommands.throttle = maxThrottleValue;
@@ -622,8 +624,8 @@ void peepingTom(ros::Publisher* flight_command_pub, Server* as)
     double holdingAlt = 1.0; //This is the altitude we want to hold in meters
     int throttle = 200;
     double upwardVelocity = 0.0;
-    int pastD = holdingAlt;
-    int currentD = holdingAlt;
+    double pastD = holdingAlt;
+    double currentD = holdingAlt;
 
     ros::Rate loop_rate(100);
 
