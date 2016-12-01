@@ -38,7 +38,7 @@ std::mutex tfLock;
 //These values need tuning
 double distGain; //124 was the origional value
 double velocityGain;
-int approxHover = 920; //throttle at which hovering occurs approximatly
+int approxHover; //throttle at which hovering occurs approximatly
 int centerYaw = 992;
 int centerPitch = 992;
 int centerRoll = 992;
@@ -51,6 +51,7 @@ void set_params() {
 
   param_handle.param("dist_gain", distGain, 1000.0);
   param_handle.param("velocity_gain", velocityGain, 500.0);
+  param_handle.param("approx_hover", approxHover, 920);
 
   ROS_INFO("monarc_tf using dist gain: %f", distGain);
   ROS_INFO("monarc_tf using velocity gain: %f", velocityGain);
