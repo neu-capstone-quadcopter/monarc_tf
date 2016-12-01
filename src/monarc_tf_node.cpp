@@ -50,10 +50,10 @@ double velocitXGain;
 
 double integralYGain;
 double yGain;
-double velocityYGain;
+double velocitYGain;
 
 double yawGain; //estimated 500
-double northHeadingValue; //estimated 0
+int northHeadingValue; //estimated 0
 
 int centerYaw = 992;
 int maxYawValue = 800;
@@ -83,14 +83,14 @@ void set_params() {
   param_handle.param("takeoff_alpha", takeoffAlpha, 0.1);
 
   param_handle.param("integral_x_gain", integralXGain, 4.0);
-  param_handle.param("x_gain", xGain, 1000.0;
+  param_handle.param("x_gain", xGain, 1000.0);
   param_handle.param("velocit_x_gain", velocitXGain, 500.0);
 
   param_handle.param("integral_y_gain", integralYGain, 4.0);
   param_handle.param("y_gain", yGain, 1000.0);
   param_handle.param("velocit_y_Gain", velocitYGain, 500.0);
 
-  param_handle.param("yaw_gain", yawGain, 100);
+  param_handle.param("yaw_gain", yawGain, 100.0);
   param_handle.param("north_heading_value", northHeadingValue, 0);
 
   ROS_INFO("monarc_tf using dist gain: %f", distGain);
@@ -753,6 +753,7 @@ void peepingTom(ros::Publisher* flight_command_pub, Server* as)
 
     while ( ros::ok() && !as->isNewGoalAvailable() )
     {
+        monarc_uart_driver::FlightControl fCommands;
 
         //---------- Adjust Yaw Values ----------//
         double yawAdjustment = 0;
@@ -777,10 +778,8 @@ void peepingTom(ros::Publisher* flight_command_pub, Server* as)
 
             upwardVelocity = currentD - pastD; //upwardVelocity in meters per loop cycle
 
-            monarc_uart_driver::FlightControl fCommands;
             fCommands.pitch = centerPitch;
             fCommands.roll = centerRoll;
-            fCommands.yaw = centerYaw;
 
             double deltaAlt = holdingAlt - currentD;
             approxHover += integralGain*deltaAlt;
@@ -872,7 +871,7 @@ void goToLocation(ros::Publisher* flight_command_pub, Server* as)
 
             double pX = deltaX*xGain;
             double iX = centerRoll;
-            double dX = -xVelocity*velocityXGain;
+            double dX = -xVelocity*velocitXGain;
             sendPID(pX, iX, dX);
 
             fCommands.roll = int(pX+iX+dX);
@@ -898,7 +897,7 @@ void goToLocation(ros::Publisher* flight_command_pub, Server* as)
 
             double pY = deltaY*xGain;
             double iY = centerPitch;
-            double dY = -yVelocity*velocityYGain;
+            double dY = -yVelocity*velocitYGain;
             sendPID(pY, iY, dY);
 
             fCommands.pitch = int(pX+iX+dX);
