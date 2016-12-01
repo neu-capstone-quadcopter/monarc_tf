@@ -34,7 +34,8 @@
 using namespace std;
 #define PI 3.1415926535897932
 geometry_msgs::TransformStamped transformStamped;
-std::mutex tfLock;
+std::mutex tfTransLock;
+std::mutex tfRotLock;
 
 //These values need tuning
 double distGain; //124 was the origional value
@@ -42,12 +43,35 @@ double velocityGain;
 double integralGain;
 double approxHover; //throttle at which hovering occurs approximatly
 double takeoffAlpha;
+
+double integralXGain;
+double xGain;
+double velocitXGain;
+
+double integralYGain;
+double yGain;
+double velocityYGain;
+
+double yawGain; //estimated 500
+double northHeadingValue; //estimated 0
+
 int centerYaw = 992;
+int maxYawValue = 800;
+int minYawValue = 1200;
+
 int centerPitch = 992;
+int maxPitchValue = 800;
+int minPitchValue = 1200;
+
 int centerRoll = 992;
+int maxRollValue = 800;
+int minRollValue = 1200;
+
 int maxThrottleValue = 1800;
 int minThrottleValue = 8;
+
 std::atomic<bool> newUltra(false);
+std::atomic<bool> newGPS(false);
 
 void set_params() {
   ros::NodeHandle param_handle("~");
@@ -57,6 +81,17 @@ void set_params() {
   param_handle.param("integral_gain", integralGain, 4.0);
   param_handle.param("approx_hover", approxHover, 920.0);
   param_handle.param("takeoff_alpha", takeoffAlpha, 0.1);
+
+  param_handle.param("integral_x_gain", integralXGain, 4.0);
+  param_handle.param("x_gain", xGain, 1000.0;
+  param_handle.param("velocit_x_gain", velocitXGain, 500.0);
+
+  param_handle.param("integral_y_gain", integralYGain, 4.0);
+  param_handle.param("y_gain", yGain, 1000.0);
+  param_handle.param("velocit_y_Gain", velocitYGain, 500.0);
+
+  param_handle.param("yaw_gain", yawGain, 100);
+  param_handle.param("north_heading_value", northHeadingValue, 0);
 
   ROS_INFO("monarc_tf using dist gain: %f", distGain);
   ROS_INFO("monarc_tf using velocity gain: %f", velocityGain);
@@ -99,6 +134,11 @@ double groundTruthZ[IMUdistAverageNumber];
 double latestXDistIMU;
 double latestYDistIMU;
 double latestZDistIMU;
+
+double rollAngle;
+double pitchAngle;
+double yawAngle;
+double wRotation;
 
 int readingTimes[1000];
 int accelDataCounter = 0;
@@ -347,6 +387,7 @@ void convertAccelToDist()
 
 void updateIMUCallback(const sensor_msgs::Imu Imu)
 {
+    //----------- Code to make Deadreckoning with IMU work---------//
     accelXData[accelDataCounter] = Imu.linear_acceleration.x;
     accelYData[accelDataCounter] = Imu.linear_acceleration.y;
     accelZData[accelDataCounter] = Imu.linear_acceleration.z;
@@ -362,6 +403,13 @@ void updateIMUCallback(const sensor_msgs::Imu Imu)
         accelDataCounter = 0;
     }
     convertAccelToDist();
+    //----------- Code to make Deadreckoning with IMU work---------//
+    rollAngle = Imu.orientation.x;
+    pitchAngle = Imu.orientation.y;
+    yawAngle = Imu.orientation.z;
+    wRotation = Imu.orientation.w;
+
+
 }
 //----------------------- IMU Deadreckoning Functions ------------------------//
 
@@ -459,10 +507,18 @@ void normalizeAltSensorFactors()
 }
 
 void setTranslationTransform(){
-    std::lock_guard<std::mutex> guard(tfLock);
+    std::lock_guard<std::mutex> guard(tfTransLock);
     transformStamped.transform.translation.x = currentGPSmetersLat;
     transformStamped.transform.translation.y = currentGPSmetersLong;
     transformStamped.transform.translation.z = (IMUAltFactor*latestZDistIMU)+(ultrasonicFactor*currentUltra)+(GPSfactor*currentGPSmetersAlt)+(barometerFactor*currentAtm);
+}
+
+void setRotationTransform(){
+    std::lock_guard<std::mutex> guard(tfRotLock); //Lock this properly make new lock
+    transformStamped.transform.rotation.x = rollAngle;
+    transformStamped.transform.rotation.y = pitchAngle;
+    transformStamped.transform.rotation.z = yawAngle;
+    transformStamped.transform.rotation.w = wRotation;
 }
 
 void updateTF()
@@ -483,17 +539,40 @@ void updateTF()
     }
 
     setTranslationTransform();
-    //TODO set these to the value coming orientation
-    transformStamped.transform.rotation.x = 0;
-    transformStamped.transform.rotation.y = 0;
-    transformStamped.transform.rotation.z = 0;
-    transformStamped.transform.rotation.w = 0;
+    setRotationTransform();
+}
+
+double getXspeed()
+{
+    return 0.01; //TODO Change this
+}
+double getYspeed()
+{
+    return 0.01; //TODO Change this
 }
 
 double getCurrentZ()
 {
-    std::lock_guard<std::mutex> guard(tfLock);
+    std::lock_guard<std::mutex> guard(tfTransLock);
     return transformStamped.transform.translation.z;
+}
+
+double getCurrentX()
+{
+    std::lock_guard<std::mutex> guard(tfTransLock);
+    return transformStamped.transform.translation.x;
+}
+
+double getCurrentY()
+{
+    std::lock_guard<std::mutex> guard(tfTransLock);
+    return transformStamped.transform.translation.y;
+}
+
+int getCurrentHeading()
+{
+    std::lock_guard<std::mutex> guard(tfRotLock);
+    return transformStamped.transform.rotation.z;
 }
 
 void sendPID(double p, double i, double d) {
@@ -674,6 +753,22 @@ void peepingTom(ros::Publisher* flight_command_pub, Server* as)
 
     while ( ros::ok() && !as->isNewGoalAvailable() )
     {
+
+        //---------- Adjust Yaw Values ----------//
+        double yawAdjustment = 0;
+        if ( (getCurrentHeading()%3600)-1800 > ((northHeadingValue+100)%3600)-1800)
+        {
+            //Change which of these is the negative sign if
+            //it spins forever
+            yawAdjustment = yawGain;
+        }
+        if ( (getCurrentHeading()%3600)-1800 < ((northHeadingValue-100)%3600)-1800)
+        {
+            yawAdjustment = - yawGain;
+        }
+        fCommands.yaw = centerYaw+yawAdjustment;
+        //---------- Adjust Yaw Values ----------//
+
         if (newUltra.exchange(false))
         {
             ROS_INFO("Hovering");
@@ -706,6 +801,147 @@ void peepingTom(ros::Publisher* flight_command_pub, Server* as)
             }
             flight_command_pub->publish(fCommands);
         }
+        loop_rate.sleep();
+    }
+}
+
+
+void goToLocation(ros::Publisher* flight_command_pub, Server* as)
+{
+    //------- Initialize Alt Variables ---------//
+    double holdingAlt = takeOffHeight; //This is the altitude we want to hold in meters
+    double upwardVelocity = 0.0;
+    double pastD = holdingAlt;
+    double currentD = holdingAlt;
+    //------- Initialize Alt Variables ---------//
+
+
+    //------- Initialize X Pos Variables ---------//
+    double holdingX = getCurrentX(); //TODO Lock and latch this
+    double xVelocity = 0.0;
+    double pastX = holdingX;
+    double currentX = holdingX;
+    //------- Initialize X Pos Variables ---------//
+
+    //------- Initialize Y Pos Variables ---------//
+    double holdingY = getCurrentY(); //TODO Lock and latch this
+    double yVelocity = 0.0;
+    double pastY = holdingY;
+    double currentY = holdingY;
+    //------- Initialize Y Pos Variables ---------//
+
+
+    ros::Rate loop_rate(100);
+    monarc_uart_driver::FlightControl fCommands;
+    fCommands.pitch = centerPitch;
+    fCommands.roll = centerRoll;
+    fCommands.yaw = centerYaw;
+    fCommands.throttle = approxHover;
+
+    double Xincrements = getXspeed();
+    double Yincrements = getYspeed(); //todo write these speed things
+
+    while ( ros::ok() && !as->isNewGoalAvailable() )
+    {
+        ROS_INFO("Moving");
+        //---------- Adjust Yaw Values ----------//
+        double yawAdjustment = 0;
+        if ( (getCurrentHeading()%3600)-1800 > ((northHeadingValue+100)%3600)-1800)
+        {
+            //Change which of these is the negative sign if
+            //it spins forever
+            yawAdjustment = yawGain;
+        }
+        if ( (getCurrentHeading()%3600)-1800 < ((northHeadingValue-100)%3600)-1800)
+        {
+            yawAdjustment = - yawGain;
+        }
+        fCommands.yaw = centerYaw+yawAdjustment;
+        //---------- Adjust Yaw Values ----------//
+
+        if (newGPS.exchange(false))
+        {
+            //---------- Adjust Roll Values ----------//
+            pastX = currentX;
+            currentX = getCurrentX();
+
+            xVelocity = currentX - pastX; //upwardVelocity in meters per loop cycle
+
+            double deltaX = holdingX - currentX;
+            centerRoll += integralXGain*deltaX;
+
+            double pX = deltaX*xGain;
+            double iX = centerRoll;
+            double dX = -xVelocity*velocityXGain;
+            sendPID(pX, iX, dX);
+
+            fCommands.roll = int(pX+iX+dX);
+            if (fCommands.roll > maxRollValue)
+            {
+                fCommands.roll = maxRollValue;
+            }
+            if (fCommands.roll < minRollValue)
+            {
+                fCommands.roll = minRollValue;
+            }
+
+            //---------- Adjust Roll Values ----------//
+
+            //---------- Adjust Pitch Values ----------//
+            pastY = currentY;
+            currentY = getCurrentY();
+
+            yVelocity = currentY - pastY; //upwardVelocity in meters per loop cycle
+
+            double deltaY = holdingY - currentY;
+            centerPitch += integralYGain*deltaY;
+
+            double pY = deltaY*xGain;
+            double iY = centerPitch;
+            double dY = -yVelocity*velocityYGain;
+            sendPID(pY, iY, dY);
+
+            fCommands.pitch = int(pX+iX+dX);
+            if (fCommands.pitch > maxPitchValue)
+            {
+                fCommands.pitch = maxPitchValue;
+            }
+            if (fCommands.pitch < minPitchValue)
+            {
+                fCommands.pitch = minPitchValue;
+            }
+
+            //---------- Adjust Pitch Values ----------//
+
+        }
+        if (newUltra.exchange(false))
+        {
+            //---------- Adjust Altitude Values ----------//
+            pastD = currentD;
+            currentD = getCurrentZ();
+
+            upwardVelocity = currentD - pastD; //upwardVelocity in meters per loop cycle
+
+            double deltaAlt = holdingAlt - currentD;
+            approxHover += integralGain*deltaAlt;
+
+            double p = deltaAlt*distGain;
+            double i = approxHover;
+            double d = -upwardVelocity*velocityGain;
+            sendPID(p, i, d);
+
+            fCommands.throttle = int(p+i+d);
+            if (fCommands.throttle > maxThrottleValue)
+            {
+                fCommands.throttle = maxThrottleValue;
+            }
+            if (fCommands.throttle < minThrottleValue)
+            {
+                fCommands.throttle = minThrottleValue;
+            }
+            //---------- Adjust Altitude Values ----------//
+        }
+        flight_command_pub->publish(fCommands);
         loop_rate.sleep();
     }
 }
