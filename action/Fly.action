@@ -7,8 +7,10 @@ int8 DOWN = 4
 int8 TURN_RIGHT_90 = 5
 int8 TURN_LEFT_90 = 6
 int8 HOVER = 7
+int8 NAVIGATE = 8
 
 int8 command
+sensor_msgs/NavSatFix command_location
 ---
 # Define the result
 bool success

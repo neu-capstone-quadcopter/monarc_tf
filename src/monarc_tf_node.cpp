@@ -711,6 +711,7 @@ void peepingTom(ros::Publisher* flight_command_pub, Server* as)
 }
 
 void executeAction(const monarc_tf::FlyGoalConstPtr& goal, Server* as, ros::Publisher* flight_command_pub) {
+  bool succeeded = false;
   switch (goal->command) {
     case monarc_tf::FlyGoal::TAKEOFF:
       ROS_INFO("Taking off!");
@@ -725,6 +726,14 @@ void executeAction(const monarc_tf::FlyGoalConstPtr& goal, Server* as, ros::Publ
     case monarc_tf::FlyGoal::HOVER:
       peepingTom(flight_command_pub, as);
       as->setPreempted();
+      return;
+    case monarc_tf::FlyGoal::NAVIGATE:
+      std::cout << "Navigating to " << goal->command_location << "\n";
+      if (succeeded) {
+        as->setSucceeded();
+      } else {
+        as->setPreempted();
+      }
       return;
     default:
       throw std::invalid_argument("unhandled command type");

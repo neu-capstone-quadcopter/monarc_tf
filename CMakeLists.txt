@@ -77,6 +77,7 @@ add_action_files(
 generate_messages(
   DEPENDENCIES
   actionlib_msgs
+  sensor_msgs
 )
 
 ################################################
