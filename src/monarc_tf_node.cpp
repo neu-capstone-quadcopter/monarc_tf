@@ -49,26 +49,13 @@ int maxThrottleValue = 1800;
 int minThrottleValue = 8;
 std::atomic<bool> newUltra(false);
 
-void set_params() {
-  ros::NodeHandle param_handle("~");
-
-  param_handle.param("dist_gain", distGain, 1000.0);
-  param_handle.param("velocity_gain", velocityGain, 500.0);
-  param_handle.param("integral_gain", integralGain, 4.0);
-  param_handle.param("approx_hover", approxHover, 920.0);
-  param_handle.param("takeoff_alpha", takeoffAlpha, 0.1);
-
-  ROS_INFO("monarc_tf using dist gain: %f", distGain);
-  ROS_INFO("monarc_tf using velocity gain: %f", velocityGain);
-}
-
 //--------------------------- TF Tuning Parameters ---------------------------//
 //these are simply default values
 double IMUAltFactor = 0.1;
 double ultrasonicFactor = 0.8;
 double GPSfactor = 0.05;
 double barometerFactor = 0.05;
-double takeOffHeight = 1.0;
+double takeOffHeight;
 //--------------------------- TF Tuning Parameters ---------------------------//
 
 //--------------------------- ROS Published Topics ---------------------------//
@@ -155,6 +142,20 @@ double currentUltra = 0.0;
 double ultraSmoothingFactor = 1.0;
 //------------------------ Ultrasonic Localization Variables ------------------------//
 int counter = 1;
+
+void set_params() {
+  ros::NodeHandle param_handle("~");
+
+  param_handle.param("dist_gain", distGain, 1000.0);
+  param_handle.param("velocity_gain", velocityGain, 500.0);
+  param_handle.param("integral_gain", integralGain, 4.0);
+  param_handle.param("approx_hover", approxHover, 920.0);
+  param_handle.param("takeoff_alpha", takeoffAlpha, 0.1);
+  param_handle.param("takeoff_height", takeOffHeight, 2.0);
+
+  ROS_INFO("monarc_tf using dist gain: %f", distGain);
+  ROS_INFO("monarc_tf using velocity gain: %f", velocityGain);
+}
 
 //-------------------- Point Cloud Localization Functions --------------------//
 void getMinMax(const sensor_msgs::PointCloud2& cloud)
@@ -467,6 +468,10 @@ void setTranslationTransform(){
 
 void updateTF()
 {
+    // Ignore bad ultrasonic readings
+    if (currentUltra > takeOffHeight + 2.0) {
+      return;
+    }
 
     if (currentUltra < 5.0)
     {
