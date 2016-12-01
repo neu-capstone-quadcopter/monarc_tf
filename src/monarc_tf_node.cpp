@@ -54,6 +54,8 @@ double velocitYGain;
 
 double yawGain; //estimated 500
 int northHeadingValue; //estimated 0
+double takeOffHeight;
+double idealSpeedHectoMetersPerSec;
 
 int centerYaw = 992;
 int maxYawValue = 800;
@@ -81,6 +83,7 @@ void set_params() {
   param_handle.param("integral_gain", integralGain, 4.0);
   param_handle.param("approx_hover", approxHover, 920.0);
   param_handle.param("takeoff_alpha", takeoffAlpha, 0.1);
+  param_handle.param("takeoff_height", takeOffHeight, 1.0);
 
   param_handle.param("integral_x_gain", integralXGain, 4.0);
   param_handle.param("x_gain", xGain, 1000.0);
@@ -92,6 +95,8 @@ void set_params() {
 
   param_handle.param("yaw_gain", yawGain, 100.0);
   param_handle.param("north_heading_value", northHeadingValue, 0);
+  param_handle.param("ideal_speed", idealSpeedHectoMetersPerSec, .005);//.005 is half a meter for sec
+
 
   ROS_INFO("monarc_tf using dist gain: %f", distGain);
   ROS_INFO("monarc_tf using velocity gain: %f", velocityGain);
@@ -103,7 +108,6 @@ double IMUAltFactor = 0.1;
 double ultrasonicFactor = 0.8;
 double GPSfactor = 0.05;
 double barometerFactor = 0.05;
-double takeOffHeight = 1.0;
 //--------------------------- TF Tuning Parameters ---------------------------//
 
 //--------------------------- ROS Published Topics ---------------------------//
@@ -174,6 +178,10 @@ double currentGPSmetersAlt = 0.0;   //logged.
 double originGPSlong = 0.0;  //these variables keep track of the exact distance
 double originGPSlat = 0.0;   //from the very first GPS coordinates that were
 double originGPSalt = 0.0;   //logged.
+
+double firstOriginGPSLong = 0.0;
+double firstOriginGPSLat = 0.0;
+
 
 double destinationGPSmetersLong = 0.0;  //these variables keep track of the exact distance
 double destinationGPSmetersLat = 0.0;   //from the very first GPS coordinates that were
@@ -483,7 +491,9 @@ void updateGPSCallback(const sensor_msgs::NavSatFix & GPS)
             {
                 GPSinitialized = true;
                 currentGPSLat = originGPSlat;
+                firstOriginGPSLat = originGPSlat;
                 currentGPSLong = originGPSlong;
+                firstOriginGPSLong = originGPSlong;
                 currentGPSAlt = originGPSalt;
             }
         }
@@ -524,7 +534,7 @@ void setRotationTransform(){
 void updateTF()
 {
 
-    if (currentUltra < 5.0)
+    if (currentUltra < 4.0)
     {
         IMUAltFactor = 0.0;
         ultrasonicFactor = 1.0;
@@ -532,23 +542,14 @@ void updateTF()
         barometerFactor = 0.0;
     } else {
         IMUAltFactor = 0.0;       //Set to some sort of std deviation
-        ultrasonicFactor = 1.0;   //Don't use if further away than 5 meters
-        GPSfactor = 0.0;          //Base
-        barometerFactor = 0.0;
+        ultrasonicFactor = 0.0;   //Don't use if further away than 5 meters
+        GPSfactor = 1.0;          //Base
+        barometerFactor = 5.0;
         normalizeAltSensorFactors();
     }
 
     setTranslationTransform();
     setRotationTransform();
-}
-
-double getXspeed()
-{
-    return 0.01; //TODO Change this
-}
-double getYspeed()
-{
-    return 0.01; //TODO Change this
 }
 
 double getCurrentZ()
@@ -805,7 +806,7 @@ void peepingTom(ros::Publisher* flight_command_pub, Server* as)
 }
 
 
-void goToLocation(ros::Publisher* flight_command_pub, Server* as)
+bool goToLocation(ros::Publisher* flight_command_pub, Server* as, double lat, double long)
 {
     //------- Initialize Alt Variables ---------//
     double holdingAlt = takeOffHeight; //This is the altitude we want to hold in meters
@@ -837,12 +838,13 @@ void goToLocation(ros::Publisher* flight_command_pub, Server* as)
     fCommands.yaw = centerYaw;
     fCommands.throttle = approxHover;
 
-    double Xincrements = getXspeed();
-    double Yincrements = getYspeed(); //todo write these speed things
-
-    while ( ros::ok() && !as->isNewGoalAvailable() )
+    while ( ros::ok() )
     {
-        ROS_INFO("Moving");
+        ROS_INFO("Moving to location");
+        if (as->isNewGoalAvailable())
+        {
+            return false;
+        }
         //---------- Adjust Yaw Values ----------//
         double yawAdjustment = 0;
         if ( (getCurrentHeading()%3600)-1800 > ((northHeadingValue+100)%3600)-1800)
@@ -943,10 +945,11 @@ void goToLocation(ros::Publisher* flight_command_pub, Server* as)
         flight_command_pub->publish(fCommands);
         loop_rate.sleep();
     }
+    return true;
 }
 
 void executeAction(const monarc_tf::FlyGoalConstPtr& goal, Server* as, ros::Publisher* flight_command_pub) {
-  bool succeeded = false;
+
   switch (goal->command) {
     case monarc_tf::FlyGoal::TAKEOFF:
       ROS_INFO("Taking off!");
@@ -963,8 +966,7 @@ void executeAction(const monarc_tf::FlyGoalConstPtr& goal, Server* as, ros::Publ
       as->setPreempted();
       return;
     case monarc_tf::FlyGoal::NAVIGATE:
-      std::cout << "Navigating to " << goal->command_location << "\n";
-      if (succeeded) {
+      if (goToLocation(flight_command_pub, as, goal->command_location.latitude, goal->command_location.longitude)) {
         as->setSucceeded();
       } else {
         as->setPreempted();
