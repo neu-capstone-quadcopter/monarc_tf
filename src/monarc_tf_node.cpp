@@ -17,6 +17,7 @@
 
 #include "std_msgs/Float32.h"
 #include "std_msgs/Int32.h"
+#include "geometry_msgs/Vector3.h"
 #include "monarc_tf/FlyAction.h"
 #include "monarc_tf/FlyGoal.h"
 #include "monarc_uart_driver/FlightControl.h"
@@ -38,7 +39,9 @@ std::mutex tfLock;
 //These values need tuning
 double distGain; //124 was the origional value
 double velocityGain;
-int approxHover; //throttle at which hovering occurs approximatly
+double integralGain;
+double approxHover; //throttle at which hovering occurs approximatly
+double takeoffAlpha;
 int centerYaw = 992;
 int centerPitch = 992;
 int centerRoll = 992;
@@ -51,7 +54,9 @@ void set_params() {
 
   param_handle.param("dist_gain", distGain, 1000.0);
   param_handle.param("velocity_gain", velocityGain, 500.0);
-  param_handle.param("approx_hover", approxHover, 920);
+  param_handle.param("integral_gain", integralGain, 4.0);
+  param_handle.param("approx_hover", approxHover, 920.0);
+  param_handle.param("takeoff_alpha", takeoffAlpha, 0.1);
 
   ROS_INFO("monarc_tf using dist gain: %f", distGain);
   ROS_INFO("monarc_tf using velocity gain: %f", velocityGain);
@@ -70,6 +75,7 @@ double takeOffHeight = 1.0;
 ros::Publisher simpleDist;
 ros::Publisher callBackCounter;
 ros::Publisher flightCommands;
+ros::Publisher pidPub;
 //--------------------------- ROS Published Topics ---------------------------//
 
 
@@ -490,6 +496,14 @@ double getCurrentZ()
     return transformStamped.transform.translation.z;
 }
 
+void sendPID(double p, double i, double d) {
+  geometry_msgs::Vector3 pidMsg;
+  pidMsg.x = p;
+  pidMsg.y = i;
+  pidMsg.z = d;
+  pidPub.publish(pidMsg);
+}
+
 void enterDangerZone(ros::Publisher* flight_command_pub)
 {
     //controller mid values are 1000 and they range
@@ -526,15 +540,19 @@ void enterDangerZone(ros::Publisher* flight_command_pub)
         loop_rate.sleep();
     }
 
+    double heightAverage = currentD;
+    double desiredHeight = takeOffHeight*.98;
+
     ROS_INFO("----- Take Off Stage 2 -----");
     holdingAlt = getCurrentZ();
-    while(currentD < takeOffHeight && ros::ok())
+    while(heightAverage < desiredHeight && ros::ok())
     {
         if (newUltra.exchange(false))
         {
             pastD = currentD;
             currentD = getCurrentZ();
             upwardVelocity = currentD - pastD; //upwardVelocity in meters per loop cycle
+            heightAverage = (takeoffAlpha*currentD) + (1-takeoffAlpha)*heightAverage;
 
             monarc_uart_driver::FlightControl fCommands;
             fCommands.pitch = centerPitch;
@@ -543,9 +561,14 @@ void enterDangerZone(ros::Publisher* flight_command_pub)
 
             deltaAlt = holdingAlt - currentD;
             holdingAlt += 0.005;
+            approxHover += integralGain*deltaAlt;
 
-            fCommands.throttle = int(approxHover+(deltaAlt*distGain)-(upwardVelocity*velocityGain));
+            double p = deltaAlt*distGain;
+            double i = approxHover;
+            double d = -upwardVelocity*velocityGain;
+            sendPID(p, i, d);
 
+            fCommands.throttle = int(p+i+d);
             if (fCommands.throttle > maxThrottleValue)
             {
                 fCommands.throttle = maxThrottleValue;
@@ -593,9 +616,14 @@ void touchdown(ros::Publisher* flight_command_pub)
 
             deltaAlt = holdingAlt - currentD;
             holdingAlt -= 0.005;
+            approxHover += integralGain*deltaAlt;
 
-            fCommands.throttle = int(approxHover+(deltaAlt*distGain)-(upwardVelocity*velocityGain));
+            double p = deltaAlt*distGain;
+            double i = approxHover;
+            double d = -upwardVelocity*velocityGain;
+            sendPID(p, i, d);
 
+            fCommands.throttle = int(p+i+d);
             if (fCommands.throttle > maxThrottleValue)
             {
                 fCommands.throttle = maxThrottleValue;
@@ -660,8 +688,14 @@ void peepingTom(ros::Publisher* flight_command_pub, Server* as)
             fCommands.yaw = centerYaw;
 
             double deltaAlt = holdingAlt - currentD;
+            approxHover += integralGain*deltaAlt;
 
-            fCommands.throttle = int(approxHover+(deltaAlt*distGain)-(upwardVelocity*velocityGain));
+            double p = deltaAlt*distGain;
+            double i = approxHover;
+            double d = -upwardVelocity*velocityGain;
+            sendPID(p, i, d);
+
+            fCommands.throttle = int(p+i+d);
             if (fCommands.throttle > maxThrottleValue)
             {
                 fCommands.throttle = maxThrottleValue;
@@ -702,8 +736,9 @@ int main(int argc, char** argv){
     ros::NodeHandle node;
     set_params();
 
-    simpleDist = node.advertise<std_msgs::Float32>("simpleDist", 0.0);
-    callBackCounter = node.advertise<std_msgs::Int32>("callbackCount", 0);
+    simpleDist = node.advertise<std_msgs::Float32>("simpleDist", 1);
+    callBackCounter = node.advertise<std_msgs::Int32>("callbackCount", 1);
+    pidPub = node.advertise<geometry_msgs::Vector3>("pid", 5);
 
     ros::Subscriber IMUsub = node.subscribe("/IMU", 10, updateIMUCallback);
     ros::Subscriber GPSsub = node.subscribe("/fix", 10, updateGPSCallback);
