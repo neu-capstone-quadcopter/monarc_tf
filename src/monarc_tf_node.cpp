@@ -637,7 +637,7 @@ typedef actionlib::SimpleActionServer<monarc_tf::FlyAction> Server;
 
 void peepingTom(ros::Publisher* flight_command_pub, Server* as)
 {
-    double holdingAlt = getCurrentZ(); //This is the altitude we want to hold in meters
+    double holdingAlt = takeOffHeight; //This is the altitude we want to hold in meters
     double upwardVelocity = 0.0;
     double pastD = holdingAlt;
     double currentD = holdingAlt;
@@ -661,7 +661,6 @@ void peepingTom(ros::Publisher* flight_command_pub, Server* as)
 
             double deltaAlt = holdingAlt - currentD;
 
-            ROS_INFO("Hovering");
             fCommands.throttle = int(approxHover+(deltaAlt*distGain)-(upwardVelocity*velocityGain));
             if (fCommands.throttle > maxThrottleValue)
             {
