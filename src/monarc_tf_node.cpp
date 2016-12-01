@@ -2,6 +2,7 @@
 #include <math.h>
 #include <stdexcept>
 #include <mutex>
+#include <atomic>
 
 #include <ros/ros.h>
 #include <ros/console.h>
@@ -37,27 +38,22 @@ std::mutex tfLock;
 //These values need tuning
 double distGain; //124 was the origional value
 double velocityGain;
-double liftoffConfirmationAltitude;
-double initialHoldingAltitude;
 int approxHover = 920; //throttle at which hovering occurs approximatly
 int centerYaw = 992;
 int centerPitch = 992;
 int centerRoll = 992;
 int maxThrottleValue = 1800;
 int minThrottleValue = 8;
+std::atomic<bool> newUltra(false);
 
 void set_params() {
   ros::NodeHandle param_handle("~");
 
   param_handle.param("dist_gain", distGain, 1000.0);
   param_handle.param("velocity_gain", velocityGain, 500.0);
-  param_handle.param("liftoff_confirmation_altitude", liftoffConfirmationAltitude, 0.1);
-  param_handle.param("initial_holding_altitude", initialHoldingAltitude, 0.2);
 
   ROS_INFO("monarc_tf using dist gain: %f", distGain);
   ROS_INFO("monarc_tf using velocity gain: %f", velocityGain);
-  ROS_INFO("monarc_tf using liftoff confirmation altitude: %f", liftoffConfirmationAltitude);
-  ROS_INFO("monarc_tf using initial holding altitude: %f", initialHoldingAltitude);
 }
 
 //--------------------------- TF Tuning Parameters ---------------------------//
@@ -365,6 +361,7 @@ void updateIMUCallback(const sensor_msgs::Imu Imu)
 
 void ultraSoundCallback(std_msgs::Int32 ultraAlt)
 {
+    newUltra = true;
     //ground is approx 190, units are millimeters
     currentUltra = ((ultraAlt.data*ultraSmoothingFactor + currentUltra*(1.0-ultraSmoothingFactor))-190.0)/1000.0;
 }
@@ -501,6 +498,9 @@ void enterDangerZone(ros::Publisher* flight_command_pub)
     double pastD = 0;
     double currentD = getCurrentZ();
 
+    double deltaAlt = 0;
+    double holdingAlt = getCurrentZ();
+
     //slowly bring up throttle to 600, about 4 seconds
     ros::Rate loop_rate(100);
     ROS_INFO("----- Take Off Stage 1 -----");
@@ -525,100 +525,100 @@ void enterDangerZone(ros::Publisher* flight_command_pub)
         loop_rate.sleep();
     }
 
-    //gets to around 1000 in 200 milliseconds
     ROS_INFO("----- Take Off Stage 2 -----");
-    while (currentD <= liftoffConfirmationAltitude && ros::ok())
-    {
-        pastD = currentD;
-        currentD = getCurrentZ();
-        upwardVelocity = currentD - pastD; //upwardVelocity in meters per loop cycle
-        monarc_uart_driver::FlightControl fCommands;
-        fCommands.pitch = centerPitch;
-        fCommands.roll = centerRoll;
-        fCommands.yaw = centerYaw;
-
-
-        throttle = throttle + 1; //turn down the last value to take off slower
-        if (throttle > maxThrottleValue)
-        {
-            throttle = maxThrottleValue;
-        }
-        if (throttle < minThrottleValue)
-        {
-            throttle = minThrottleValue;
-        }
-
-        fCommands.throttle = throttle;
-        flight_command_pub->publish(fCommands);
-        loop_rate.sleep();
-    }
-
-    double deltaAlt = 0;
-    double holdingAlt = initialHoldingAltitude;
-
-    ROS_INFO("----- Take Off Stage 3 -----");
+    holdingAlt = getCurrentZ();
     while(currentD < takeOffHeight && ros::ok())
     {
-        pastD = currentD;
-        currentD = getCurrentZ();
-        upwardVelocity = currentD - pastD; //upwardVelocity in meters per loop cycle
-
-        monarc_uart_driver::FlightControl fCommands;
-        fCommands.pitch = centerPitch;
-        fCommands.roll = centerRoll;
-        fCommands.yaw = centerYaw;
-
-        deltaAlt = holdingAlt - currentD;
-        holdingAlt += 0.0005;
-
-        fCommands.throttle = int(approxHover+(deltaAlt*distGain)-(upwardVelocity*velocityGain));
-
-        if (fCommands.throttle > maxThrottleValue)
+        if (newUltra.exchange(false))
         {
-            fCommands.throttle = maxThrottleValue;
-        }
-        if (fCommands.throttle < minThrottleValue)
-        {
-            fCommands.throttle = minThrottleValue;
-        }
+            pastD = currentD;
+            currentD = getCurrentZ();
+            upwardVelocity = currentD - pastD; //upwardVelocity in meters per loop cycle
 
-        flight_command_pub->publish(fCommands);
+            monarc_uart_driver::FlightControl fCommands;
+            fCommands.pitch = centerPitch;
+            fCommands.roll = centerRoll;
+            fCommands.yaw = centerYaw;
 
+            deltaAlt = holdingAlt - currentD;
+            holdingAlt += 0.005;
+
+            fCommands.throttle = int(approxHover+(deltaAlt*distGain)-(upwardVelocity*velocityGain));
+
+            if (fCommands.throttle > maxThrottleValue)
+            {
+                fCommands.throttle = maxThrottleValue;
+            }
+            if (fCommands.throttle < minThrottleValue)
+            {
+                fCommands.throttle = minThrottleValue;
+            }
+
+            flight_command_pub->publish(fCommands);
+        }
         loop_rate.sleep();
     }
 }
+
 
 void touchdown(ros::Publisher* flight_command_pub)
 {
+    //controller mid values are 1000 and they range
+    //from about 200 to 1800
+    int throttle = 200;
     double upwardVelocity = 0.0;
-    double pastD = getCurrentZ();
-    double currentD = pastD;
-    double holdingAlt = currentD; //This is the altitude we want to hold in meters
+    double pastD = 0;
+    double currentD = getCurrentZ();
 
+    //slowly bring up throttle to 600, about 4 seconds
     ros::Rate loop_rate(100);
-
-    monarc_uart_driver::FlightControl fCommands;
+    double deltaAlt = 0;
+    double holdingAlt = currentD;
     ROS_INFO("Landing @ %f", holdingAlt);
-    while ( ros::ok() && holdingAlt > 0.02 )
+
+    while(currentD > 0.02 && ros::ok())
     {
-        ROS_INFO("Landing");
-        pastD = currentD;
-        currentD = getCurrentZ();
-
-        upwardVelocity = currentD - pastD; //upwardVelocity in meters per loop cycle
-
-        if (currentD - holdingAlt <= 0.02 && currentD - holdingAlt >= -0.02)
+        ROS_INFO("----- LANDING Stage 1 -----");
+        if (newUltra.exchange(false))
         {
-            holdingAlt *= 0.90;
+            pastD = currentD;
+            currentD = getCurrentZ();
+            upwardVelocity = currentD - pastD; //upwardVelocity in meters per loop cycle
+
+            monarc_uart_driver::FlightControl fCommands;
+            fCommands.pitch = centerPitch;
+            fCommands.roll = centerRoll;
+            fCommands.yaw = centerYaw;
+
+            deltaAlt = holdingAlt - currentD;
+            holdingAlt -= 0.005;
+
+            fCommands.throttle = int(approxHover+(deltaAlt*distGain)-(upwardVelocity*velocityGain));
+
+            if (fCommands.throttle > maxThrottleValue)
+            {
+                fCommands.throttle = maxThrottleValue;
+            }
+            if (fCommands.throttle < minThrottleValue)
+            {
+                fCommands.throttle = minThrottleValue;
+            }
+
+            flight_command_pub->publish(fCommands);
         }
+        loop_rate.sleep();
+    }
+
+    while (throttle > minThrottleValue && ros::ok())
+    {
+        ROS_INFO("----- Landing Stage 2 -----");
+        monarc_uart_driver::FlightControl fCommands;
         fCommands.pitch = centerPitch;
         fCommands.roll = centerRoll;
         fCommands.yaw = centerYaw;
 
-        double deltaAlt = holdingAlt - currentD;
-
-        fCommands.throttle = int(approxHover+(deltaAlt*distGain)-(upwardVelocity*velocityGain));
-        ROS_INFO("%d  %f  %f", fCommands.throttle, (deltaAlt*distGain), (upwardVelocity*velocityGain));
+        throttle = throttle - 3;
+        fCommands.throttle = throttle;
         if (fCommands.throttle > maxThrottleValue)
         {
             fCommands.throttle = maxThrottleValue;
@@ -630,53 +630,48 @@ void touchdown(ros::Publisher* flight_command_pub)
         flight_command_pub->publish(fCommands);
         loop_rate.sleep();
     }
-    fCommands.pitch = centerPitch;
-    fCommands.roll = centerRoll;
-    fCommands.yaw = centerYaw;
-    fCommands.throttle = minThrottleValue;
-
-    flight_command_pub->publish(fCommands);
 }
-
 typedef actionlib::SimpleActionServer<monarc_tf::FlyAction> Server;
 
 
 void peepingTom(ros::Publisher* flight_command_pub, Server* as)
 {
-    double holdingAlt = 1.0; //This is the altitude we want to hold in meters
-    int throttle = 200;
+    double holdingAlt = getCurrentZ(); //This is the altitude we want to hold in meters
     double upwardVelocity = 0.0;
     double pastD = holdingAlt;
     double currentD = holdingAlt;
 
     ros::Rate loop_rate(100);
 
-
     while ( ros::ok() && !as->isNewGoalAvailable() )
     {
-        ROS_INFO("Hovering");
-        pastD = currentD;
-        currentD = getCurrentZ();
-
-        upwardVelocity = currentD - pastD; //upwardVelocity in meters per loop cycle
-
-        monarc_uart_driver::FlightControl fCommands;
-        fCommands.pitch = centerPitch;
-        fCommands.roll = centerRoll;
-        fCommands.yaw = centerYaw;
-
-        double deltaAlt = takeOffHeight - currentD;
-
-        fCommands.throttle = int(approxHover+(deltaAlt*distGain)-(upwardVelocity*velocityGain));
-        if (fCommands.throttle > maxThrottleValue)
+        if (newUltra.exchange(false))
         {
-            fCommands.throttle = maxThrottleValue;
+            ROS_INFO("Hovering");
+            pastD = currentD;
+            currentD = getCurrentZ();
+
+            upwardVelocity = currentD - pastD; //upwardVelocity in meters per loop cycle
+
+            monarc_uart_driver::FlightControl fCommands;
+            fCommands.pitch = centerPitch;
+            fCommands.roll = centerRoll;
+            fCommands.yaw = centerYaw;
+
+            double deltaAlt = holdingAlt - currentD;
+
+            ROS_INFO("Hovering");
+            fCommands.throttle = int(approxHover+(deltaAlt*distGain)-(upwardVelocity*velocityGain));
+            if (fCommands.throttle > maxThrottleValue)
+            {
+                fCommands.throttle = maxThrottleValue;
+            }
+            if (fCommands.throttle < minThrottleValue)
+            {
+                fCommands.throttle = minThrottleValue;
+            }
+            flight_command_pub->publish(fCommands);
         }
-        if (fCommands.throttle < minThrottleValue)
-        {
-            fCommands.throttle = minThrottleValue;
-        }
-        flight_command_pub->publish(fCommands);
         loop_rate.sleep();
     }
 }
