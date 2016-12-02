@@ -754,7 +754,7 @@ int main(int argc, char** argv){
     callBackCounter = node.advertise<std_msgs::Int32>("callbackCount", 1);
     pidPub = node.advertise<geometry_msgs::Vector3>("pid", 5);
 
-    ros::Subscriber IMUsub = node.subscribe("/IMU", 10, updateIMUCallback);
+    ros::Subscriber IMUsub = node.subscribe("/imu_data", 10, updateIMUCallback);
     ros::Subscriber GPSsub = node.subscribe("/fix", 10, updateGPSCallback);
     ros::Subscriber ultsub = node.subscribe("/ultrasonic_altitude", 10, ultraSoundCallback);
     ros::Subscriber atosub = node.subscribe("/atmospheric_pressure", 10, atomspherCallback);
