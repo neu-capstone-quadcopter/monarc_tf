@@ -278,7 +278,7 @@ void pointCloudCallback(const sensor_msgs::PointCloud2& msg)
 // - Buffer all but one subscription, and "drive" the broadcast from one (Chris Likes this option)
 // - Use a Time Synchronizer (http://wiki.ros.org/message_filters#Time_Synchronizer)
 {
-    /*
+    
     //This code should be commented out until we are ready to use the
     //camera data once again
 
@@ -312,14 +312,14 @@ void pointCloudCallback(const sensor_msgs::PointCloud2& msg)
 
     std_msgs::Float32 nDist;
     nDist.data = avgDistance;
-    simpleDist.publish(nDist); // only used for plotting
+    //simpleDist.publish(nDist); // only used for plotting
 
     std_msgs::Int32 callCount;
     callCount.data = counter;
-    callBackCounter.publish(callCount);
+    //callBackCounter.publish(callCount);
     br.sendTransform(transformStamped);
     counter++;
-    */
+    
 }
 //-------------------- Point Cloud Localization Functions --------------------//
 
@@ -758,7 +758,7 @@ int main(int argc, char** argv){
     ros::Subscriber GPSsub = node.subscribe("/fix", 10, updateGPSCallback);
     ros::Subscriber ultsub = node.subscribe("/ultrasonic_altitude", 10, ultraSoundCallback);
     ros::Subscriber atosub = node.subscribe("/atmospheric_pressure", 10, atomspherCallback);
-    //ros::Subscriber Camsub = node.subscribe("/points2", 10, pointCloudCallback); //disabled till after up down test flight
+    ros::Subscriber Camsub = node.subscribe("/points2", 10, pointCloudCallback); //disabled till after up down test flight
 
     ros::Publisher flight_command_pub = node.advertise<monarc_uart_driver::FlightControl>("flight_control", 10);
     Server server(node, "fly", boost::bind(&executeAction, _1, &server, &flight_command_pub), false);
